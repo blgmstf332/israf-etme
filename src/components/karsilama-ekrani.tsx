@@ -1,31 +1,20 @@
 
-import Storage from 'expo-sqlite/kv-store';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Animated,
-    Easing,
-    Modal,
-    StatusBar,
-    StyleSheet,
-    Text,
-    View,
+  Animated,
+  Easing,
+  Modal,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
-// İlk açılış bilgisini sakladığımız anahtar.
-// Yeni sürümü bir kez test edebilmek için v2 kullanıyoruz.
-const KARSILAMA_KEY = 'israfetme_karsilama_tamekran_v2';
+
 
 export function KarsilamaEkrani() {
 
-  // Karşılama daha önce gösterilmiş mi?
-  const [gorunsun, setGorunsun] = useState(() => {
-    try {
-      return Storage.getItemSync(KARSILAMA_KEY) !== 'evet';
-    } catch (hata) {
-      console.warn('Karşılama bilgisi okunamadı:', hata);
-      return true;
-    }
-  });
+  const [gorunsun, setGorunsun] = useState(true);
 
   // Animasyon değişkenleri
   const saydamlik = useRef(new Animated.Value(1)).current;
@@ -68,13 +57,6 @@ export function KarsilamaEkrani() {
       ]).start(({ finished }) => {
 
         if (!finished) return;
-
-        // İlk açılışın tamamlandığını kaydet.
-        try {
-          Storage.setItemSync(KARSILAMA_KEY, 'evet');
-        } catch (hata) {
-          console.warn('Karşılama bilgisi kaydedilemedi:', hata);
-        }
 
         // Modal ekranını tamamen kapat.
         setGorunsun(false);
