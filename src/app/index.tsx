@@ -1,4 +1,8 @@
 
+import { AlisverisEkrani } from '@/components/alisveris-ekrani';
+import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
+import { IstatistikEkrani } from '@/components/istatistik-ekrani';
+import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
 import Storage from 'expo-sqlite/kv-store';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -11,10 +15,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { AlisverisEkrani } from '@/components/alisveris-ekrani';
-import { IstatistikEkrani } from '@/components/istatistik-ekrani';
-import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
 // Eski kayıtlar ve yeni kayıtlar için ayrı anahtarlar
 const ESKI_STORAGE_KEY = 'israfetme_urunler_v1';
 const STORAGE_KEY = 'israfetme_veriler_v2';
@@ -729,6 +729,10 @@ export default function HomeScreen() {
     🛒 Alışveriş Listem
   </Text>
 </TouchableOpacity>
+         <BildirimYoneticisi
+          urunler={urunler}
+          yuklendi={yuklendi}
+/>
         <Text style={styles.sectionTitle}>Yeni Ürün Ekle</Text>
 
         <Text style={styles.label}>Ürün Adı</Text>
