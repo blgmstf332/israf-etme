@@ -12,9 +12,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AlisverisEkrani } from '@/components/alisveris-ekrani';
 import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
-
 // Eski kayıtlar ve yeni kayıtlar için ayrı anahtarlar
 const ESKI_STORAGE_KEY = 'israfetme_urunler_v1';
 const STORAGE_KEY = 'israfetme_veriler_v2';
@@ -369,6 +369,7 @@ export default function HomeScreen() {
 
   const [yuklendi, setYuklendi] = useState(false);
   const [istatistikAcik, setIstatistikAcik] = useState(false);
+  const [alisverisAcik, setAlisverisAcik] = useState(false);
   const [yuklemeHatasi, setYuklemeHatasi] = useState(false);
 
   // Kayıt işlemlerinin sırasını korur.
@@ -718,6 +719,14 @@ export default function HomeScreen() {
 >
   <Text style={styles.buttonText}>
     📊 İstatistiklerimi Gör
+  </Text>
+</TouchableOpacity>
+<TouchableOpacity
+  style={styles.button}
+  onPress={() => setAlisverisAcik(true)}
+>
+  <Text style={styles.buttonText}>
+    🛒 Alışveriş Listem
   </Text>
 </TouchableOpacity>
         <Text style={styles.sectionTitle}>Yeni Ürün Ekle</Text>
@@ -1100,6 +1109,23 @@ export default function HomeScreen() {
   onClose={() => setIstatistikAcik(false)}
   urunler={urunler}
   gecmis={gecmis}
+/>
+<AlisverisEkrani
+  visible={alisverisAcik}
+  onClose={() => setAlisverisAcik(false)}
+  stokUrunleri={urunler}
+  onStogaAktar={(urun) => {
+    setVeriler((onceki) => ({
+      ...onceki,
+      urunler: [
+        ...onceki.urunler,
+        {
+          id: yeniId(),
+          ...urun,
+        },
+      ],
+    }));
+  }}
 />
       <KarsilamaEkrani />
     </SafeAreaView>
