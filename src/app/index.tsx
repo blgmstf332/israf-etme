@@ -1,6 +1,6 @@
 
 import Storage from 'expo-sqlite/kv-store';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -12,9 +12,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
 
-const STORAGE_KEY = 'israfetme_urunler_v1';
+// Eski kayıtlar ve yeni kayıtlar için ayrı anahtarlar
+const ESKI_STORAGE_KEY = 'israfetme_urunler_v1';
+const STORAGE_KEY = 'israfetme_veriler_v2';
 
 const KATEGORILER = [
   'Süt Ürünleri',
@@ -39,14 +42,28 @@ type Urun = {
   birim: Birim;
 };
 
-// YENİ: Tarih durumlarının tipleri
+// YENİ: Bir ürünün nasıl değerlendirildiğini tutar.
+type IslemTuru = 'tuketildi' | 'israf';
+
+// YENİ: İşlem geçmişindeki kayıt
+type GecmisKaydi = Urun & {
+  kayitId: string;
+  islem: IslemTuru;
+  islemTarihi: string;
+};
+
+// YENİ: Uygulamanın kalıcı verileri
+type UygulamaVerisi = {
+  urunler: Urun[];
+  gecmis: GecmisKaydi[];
+};
+
 type DurumTuru =
   | 'gecmis'
   | 'yaklasan'
   | 'normal'
   | 'gecersiz';
 
-// YENİ: Duruma göre renkler
 const DURUM_RENKLERI = {
   gecmis: {
     arkaPlan: '#FFF0EF',
@@ -74,7 +91,12 @@ const DURUM_RENKLERI = {
   },
 };
 
-// Kullanıcının tarih girişini standart biçime dönüştürür.
+// Benzersiz kayıt kimliği oluşturur.
+function yeniId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Girilen tarihi YYYY-AA-GG biçimine çevirir.
 function tarihiDuzenle(giris: string): string | null {
   const parcalar = giris.trim().split(/\D+/);
 
@@ -122,7 +144,7 @@ function tarihiGoster(tarih: string): string {
   return tarih.split('-').reverse().join('.');
 }
 
-// Tarihe kalan gün sayısını hesaplar.
+// Son tüketim tarihine kalan gün sayısı
 function kalanGun(tarih: string): number | null {
   const eslesme = /^(\d{4})-(\d{2})-(\d{2})$/.exec(tarih);
 
@@ -155,7 +177,7 @@ function kalanGun(tarih: string): number | null {
   );
 }
 
-// YENİ: Tarihe göre metin ve durum oluşturur.
+// Tarih durumunu belirler.
 function durumBilgisi(tarih: string): {
   metin: string;
   tur: DurumTuru;
@@ -202,7 +224,7 @@ function durumBilgisi(tarih: string): {
   };
 }
 
-// Miktar doğrulama
+// Kullanıcının girdiği miktarı doğrular.
 function miktariDuzenle(giris: string): number | null {
   const metin = giris.trim().replace(',', '.');
 
@@ -223,10 +245,21 @@ function miktariGoster(miktar: number): string {
   return String(miktar).replace('.', ',');
 }
 
-// Eski ürün kayıtlarını yeni veri yapısına uyarlar.
+// İşlem tarihini Türkçe gösterir.
+function islemTarihiniGoster(tarih: string): string {
+  const tarihNesnesi = new Date(tarih);
+
+  if (Number.isNaN(tarihNesnesi.getTime())) {
+    return 'Bilinmiyor';
+  }
+
+  return tarihNesnesi.toLocaleDateString('tr-TR');
+}
+
+// Eski ve yeni ürünleri ortak veri tipine dönüştürür.
 function kayitlariDuzenle(veri: unknown): Urun[] {
   if (!Array.isArray(veri)) {
-    throw new Error('Kayıtlı ürün listesi geçersiz.');
+    throw new Error('Ürün listesi geçersiz.');
   }
 
   return veri.map((kayit: unknown) => {
@@ -241,7 +274,7 @@ function kayitlariDuzenle(veri: unknown): Urun[] {
       typeof urun.ad !== 'string' ||
       typeof urun.sonTarih !== 'string'
     ) {
-      throw new Error('Ürün bilgilerinde eksik alan var.');
+      throw new Error('Eksik ürün bilgisi.');
     }
 
     const kategori =
@@ -270,19 +303,78 @@ function kayitlariDuzenle(veri: unknown): Urun[] {
   });
 }
 
+// YENİ: İşlem geçmişindeki kayıtları doğrular.
+function gecmisiDuzenle(veri: unknown): GecmisKaydi[] {
+  if (!Array.isArray(veri)) {
+    throw new Error('İşlem geçmişi geçersiz.');
+  }
+
+  return veri.map((kayit: unknown) => {
+    if (typeof kayit !== 'object' || kayit === null) {
+      throw new Error('Geçmiş kaydı geçersiz.');
+    }
+
+    const nesne = kayit as Record<string, unknown>;
+    const urun = kayitlariDuzenle([kayit])[0];
+
+    if (
+      typeof nesne.kayitId !== 'string' ||
+      typeof nesne.islemTarihi !== 'string' ||
+      (nesne.islem !== 'tuketildi' &&
+        nesne.islem !== 'israf')
+    ) {
+      throw new Error('İşlem geçmişi bilgisi eksik.');
+    }
+
+    return {
+      ...urun,
+      kayitId: nesne.kayitId,
+      islem: nesne.islem,
+      islemTarihi: nesne.islemTarihi,
+    };
+  });
+}
+
+// YENİ: Kaydedilen uygulama verisini doğrular.
+function verileriDuzenle(veri: unknown): UygulamaVerisi {
+  if (
+    typeof veri !== 'object' ||
+    veri === null ||
+    Array.isArray(veri)
+  ) {
+    throw new Error('Uygulama verisi geçersiz.');
+  }
+
+  const kayit = veri as Record<string, unknown>;
+
+  return {
+    urunler: kayitlariDuzenle(kayit.urunler),
+    gecmis: gecmisiDuzenle(kayit.gecmis),
+  };
+}
+
 export default function HomeScreen() {
-  // Ürün ekleme
+  // Ürün ekleme alanları
   const [urunAdi, setUrunAdi] = useState('');
   const [tarih, setTarih] = useState('');
   const [kategori, setKategori] = useState<Kategori>('Diğer');
   const [miktar, setMiktar] = useState('1');
   const [birim, setBirim] = useState<Birim>('Adet');
 
-  // Ürün listesi
-  const [urunler, setUrunler] = useState<Urun[]>([]);
-  const [yuklendi, setYuklendi] = useState(false);
+  // YENİ: Stok ve işlem geçmişi birlikte tutuluyor.
+  const [veriler, setVeriler] = useState<UygulamaVerisi>({
+    urunler: [],
+    gecmis: [],
+  });
 
-  // Ürün düzenleme
+  const [yuklendi, setYuklendi] = useState(false);
+  const [istatistikAcik, setIstatistikAcik] = useState(false);
+  const [yuklemeHatasi, setYuklemeHatasi] = useState(false);
+
+  // Kayıt işlemlerinin sırasını korur.
+  const kayitSirasi = useRef<Promise<void>>(Promise.resolve());
+
+  // Düzenleme alanları
   const [duzenlenenUrunId, setDuzenlenenUrunId] =
     useState<string | null>(null);
 
@@ -294,60 +386,83 @@ export default function HomeScreen() {
   const [duzenlemeBirimi, setDuzenlemeBirimi] =
     useState<Birim>('Adet');
 
-  // SQLite'dan kayıtları yükle.
+  const urunler = veriler.urunler;
+  const gecmis = veriler.gecmis;
+
+  // Uygulama açıldığında verileri oku.
   useEffect(() => {
     let aktif = true;
 
-    async function urunleriYukle() {
+    async function verileriYukle() {
       try {
-        const kayit = await Storage.getItem(STORAGE_KEY);
+        const yeniKayit = await Storage.getItem(STORAGE_KEY);
 
         if (!aktif) return;
 
-        if (kayit !== null) {
-          const veri: unknown = JSON.parse(kayit);
-          setUrunler(kayitlariDuzenle(veri));
+        if (yeniKayit !== null) {
+          // Yeni veri yapısı zaten mevcut.
+          const veri: unknown = JSON.parse(yeniKayit);
+
+          setVeriler(verileriDuzenle(veri));
+        } else {
+          // İlk geçiş: Eski ürün listesini koru.
+          const eskiKayit =
+            await Storage.getItem(ESKI_STORAGE_KEY);
+
+          if (!aktif) return;
+
+          const eskiUrunler =
+            eskiKayit !== null
+              ? kayitlariDuzenle(JSON.parse(eskiKayit))
+              : [];
+
+          setVeriler({
+            urunler: eskiUrunler,
+            gecmis: [],
+          });
         }
 
         setYuklendi(true);
       } catch (hata) {
         if (!aktif) return;
 
-        console.error('Ürünler yüklenemedi:', hata);
+        console.error('Veriler yüklenemedi:', hata);
+        setYuklemeHatasi(true);
+
         Alert.alert(
-          'Hata',
-          'Kayıtlı ürünler okunamadı. Uygulamayı yeniden başlat.'
+          'Veri hatası',
+          'Kayıtlı veriler okunamadı. Uygulamayı yeniden başlat.'
         );
       }
     }
 
-    urunleriYukle();
+    verileriYukle();
 
     return () => {
       aktif = false;
     };
   }, []);
 
-  // Ürün değişikliklerini SQLite'a kaydet.
+  // Stok ve geçmiş değişikliklerini SQLite'a kaydet.
   useEffect(() => {
     if (!yuklendi) return;
 
-    async function urunleriKaydet() {
-      try {
-        await Storage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(urunler)
-        );
-      } catch (hata) {
-        console.error('Ürünler kaydedilemedi:', hata);
-        Alert.alert('Hata', 'Ürünler kaydedilemedi.');
-      }
-    }
+    const kaydedilecekVeri = JSON.stringify(veriler);
 
-    urunleriKaydet();
-  }, [urunler, yuklendi]);
+    // Hızlı ardışık işlemlerde yazmaları sıraya al.
+    kayitSirasi.current = kayitSirasi.current
+      .catch(() => {})
+      .then(() =>
+        Storage.setItem(STORAGE_KEY, kaydedilecekVeri)
+      );
 
-  // YENİ: Ürünleri son tüketim tarihine göre sırala.
+    kayitSirasi.current.catch((hata) => {
+      console.error('Veriler kaydedilemedi:', hata);
+      Alert.alert('Hata', 'Değişiklikler kaydedilemedi.');
+    });
+  }, [veriler, yuklendi]);
+
+  // Ürünleri son tüketim tarihine göre sırala.
   const siraliUrunler = [...urunler].sort((a, b) => {
     const gunA = kalanGun(a.sonTarih);
     const gunB = kalanGun(b.sonTarih);
@@ -362,7 +477,19 @@ export default function HomeScreen() {
     return gunA - gunB || a.ad.localeCompare(b.ad, 'tr');
   });
 
-  // Yeni ürün ekleme
+  // YENİ: Basit işlem sayaçları
+  const tuketilenSayisi = gecmis.filter(
+    (kayit) => kayit.islem === 'tuketildi'
+  ).length;
+
+  const israfSayisi = gecmis.filter(
+    (kayit) => kayit.islem === 'israf'
+  ).length;
+
+  // Son yapılan işlemleri önce göster.
+  const sonIslemler = [...gecmis].reverse().slice(0, 10);
+
+  // Yeni ürün ekle.
   const urunEkle = () => {
     if (!yuklendi) return;
 
@@ -387,7 +514,7 @@ export default function HomeScreen() {
     }
 
     const yeniUrun: Urun = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: yeniId(),
       ad: temizAd,
       sonTarih: duzenliTarih,
       kategori,
@@ -395,10 +522,10 @@ export default function HomeScreen() {
       birim,
     };
 
-    setUrunler((oncekiUrunler) => [
-      ...oncekiUrunler,
-      yeniUrun,
-    ]);
+    setVeriler((onceki) => ({
+      ...onceki,
+      urunler: [...onceki.urunler, yeniUrun],
+    }));
 
     setUrunAdi('');
     setTarih('');
@@ -407,11 +534,11 @@ export default function HomeScreen() {
     setBirim('Adet');
   };
 
-  // Ürün silme
+  // Ürün silme: İşlem geçmişine eklemez.
   const urunSil = (urunId: string) => {
     Alert.alert(
       'Ürünü Sil',
-      'Bu ürünü silmek istediğine emin misin?',
+      'Bu ürün kaydı geçmişe eklenmeden silinecek. Emin misin?',
       [
         {
           text: 'İptal',
@@ -421,28 +548,81 @@ export default function HomeScreen() {
           text: 'Sil',
           style: 'destructive',
           onPress: () => {
-            setUrunler((oncekiUrunler) =>
-              oncekiUrunler.filter(
+            setVeriler((onceki) => ({
+              ...onceki,
+              urunler: onceki.urunler.filter(
                 (urun) => urun.id !== urunId
-              )
-            );
+              ),
+            }));
           },
         },
       ]
     );
   };
 
-  // Düzenlemeyi başlat
+  // YENİ: Ürünü tüketildi veya israf edildi olarak kaydet.
+  const urunTamamla = (urun: Urun, islem: IslemTuru) => {
+    const baslik =
+      islem === 'tuketildi' ? 'Ürün Tüketildi' : 'Ürün İsraf Edildi';
+
+    const aciklama =
+      islem === 'tuketildi'
+        ? `${urun.ad} ürününün tamamını tükettiğini onaylıyor musun?`
+        : `${urun.ad} ürününün tamamının israf edildiğini onaylıyor musun?`;
+
+    Alert.alert(baslik, aciklama, [
+      {
+        text: 'İptal',
+        style: 'cancel',
+      },
+      {
+        text: 'Onayla',
+        onPress: () => {
+          const yeniGecmisKaydi: GecmisKaydi = {
+            ...urun,
+            kayitId: yeniId(),
+            islem,
+            islemTarihi: new Date().toISOString(),
+          };
+
+          setVeriler((onceki) => {
+            // Aynı ürün tekrar işlenmesin.
+            const urunVarMi = onceki.urunler.some(
+              (item) => item.id === urun.id
+            );
+
+            if (!urunVarMi) return onceki;
+
+           return {
+  urunler: onceki.urunler.filter(
+    (item) => item.id !== urun.id
+  ),
+  gecmis: [
+    ...onceki.gecmis,
+    yeniGecmisKaydi,
+  ],
+};
+});
+
+          if (duzenlenenUrunId === urun.id) {
+            duzenlemeyiIptal();
+          }
+        },
+      },
+    ]);
+  };
+
+  // Düzenleme alanını aç.
   const duzenlemeyiBaslat = (urun: Urun) => {
     setDuzenlenenUrunId(urun.id);
     setDuzenlemeAdi(urun.ad);
     setDuzenlemeTarihi(tarihiGoster(urun.sonTarih));
     setDuzenlemeKategorisi(urun.kategori);
-    setDuzenlemeMiktari(String(urun.miktar).replace('.', ','));
+    setDuzenlemeMiktari(miktariGoster(urun.miktar));
     setDuzenlemeBirimi(urun.birim);
   };
 
-  // Düzenlemeyi iptal et
+  // Düzenlemeyi iptal et.
   const duzenlemeyiIptal = () => {
     setDuzenlenenUrunId(null);
     setDuzenlemeAdi('');
@@ -452,7 +632,7 @@ export default function HomeScreen() {
     setDuzenlemeBirimi('Adet');
   };
 
-  // Düzenlemeyi kaydet
+  // Düzenlemeyi kaydet.
   const duzenlemeyiKaydet = () => {
     if (!yuklendi || duzenlenenUrunId === null) return;
 
@@ -476,8 +656,9 @@ export default function HomeScreen() {
       return;
     }
 
-    setUrunler((oncekiUrunler) =>
-      oncekiUrunler.map((urun) =>
+    setVeriler((onceki) => ({
+      ...onceki,
+      urunler: onceki.urunler.map((urun) =>
         urun.id === duzenlenenUrunId
           ? {
               ...urun,
@@ -488,8 +669,8 @@ export default function HomeScreen() {
               birim: duzenlemeBirimi,
             }
           : urun
-      )
-    );
+      ),
+    }));
 
     duzenlemeyiIptal();
   };
@@ -506,9 +687,40 @@ export default function HomeScreen() {
           Gıdalarını takip et, israfı önle!
         </Text>
 
-        <Text style={styles.sectionTitle}>
-          Yeni Ürün Ekle
-        </Text>
+        {/* YENİ: Stok ve işlem özeti */}
+        <Text style={styles.sectionTitle}>Genel Durum</Text>
+
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryNumber}>
+              {urunler.length}
+            </Text>
+            <Text style={styles.summaryLabel}>Stokta</Text>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <Text style={[styles.summaryNumber, styles.greenText]}>
+              {tuketilenSayisi}
+            </Text>
+            <Text style={styles.summaryLabel}>Tüketilen</Text>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <Text style={[styles.summaryNumber, styles.redText]}>
+              {israfSayisi}
+            </Text>
+            <Text style={styles.summaryLabel}>İsraf</Text>
+          </View>
+        </View>
+<TouchableOpacity
+  style={styles.button}
+  onPress={() => setIstatistikAcik(true)}
+>
+  <Text style={styles.buttonText}>
+    📊 İstatistiklerimi Gör
+  </Text>
+</TouchableOpacity>
+        <Text style={styles.sectionTitle}>Yeni Ürün Ekle</Text>
 
         <Text style={styles.label}>Ürün Adı</Text>
         <TextInput
@@ -612,11 +824,13 @@ export default function HomeScreen() {
 
         {!yuklendi ? (
           <Text style={styles.emptyText}>
-            Kayıtlı ürünler yükleniyor...
+            {yuklemeHatasi
+              ? 'Veriler okunamadı. Uygulamayı yeniden başlat.'
+              : 'Kayıtlı ürünler yükleniyor...'}
           </Text>
         ) : urunler.length === 0 ? (
           <Text style={styles.emptyText}>
-            Henüz ürün eklemedin.
+            Henüz stokta ürün bulunmuyor.
           </Text>
         ) : (
           siraliUrunler.map((urun) => {
@@ -635,7 +849,6 @@ export default function HomeScreen() {
                 ]}
               >
                 {duzenlenenUrunId === urun.id ? (
-                  // Düzenleme formu
                   <View style={styles.editForm}>
                     <Text style={styles.label}>Ürün Adı</Text>
                     <TextInput
@@ -741,7 +954,6 @@ export default function HomeScreen() {
                     </View>
                   </View>
                 ) : (
-                  // YENİ: Renkli ürün kartı
                   <>
                     <View style={styles.cardHeader}>
                       <Text style={styles.productName}>
@@ -786,6 +998,27 @@ export default function HomeScreen() {
                       {durum.metin}
                     </Text>
 
+                    {/* YENİ: Tüketim ve israf butonları */}
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.consumedButton]}
+                        onPress={() => urunTamamla(urun, 'tuketildi')}
+                      >
+                        <Text style={styles.consumedButtonText}>
+                          ✓ Tüketildi
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.wastedButton]}
+                        onPress={() => urunTamamla(urun, 'israf')}
+                      >
+                        <Text style={styles.wastedButtonText}>
+                          İsraf Edildi
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
                     <View style={styles.actionRow}>
                       <TouchableOpacity
                         style={[styles.actionButton, styles.editButton]}
@@ -811,14 +1044,68 @@ export default function HomeScreen() {
             );
           })
         )}
-      </ScrollView>
 
+        {/* YENİ: İşlem geçmişi */}
+        <Text style={styles.sectionTitle}>
+          Son İşlemler ({gecmis.length})
+        </Text>
+
+        {gecmis.length === 0 ? (
+          <Text style={styles.emptyText}>
+            Henüz tüketim veya israf kaydı bulunmuyor.
+          </Text>
+        ) : (
+          sonIslemler.map((kayit) => (
+            <View
+              key={kayit.kayitId}
+              style={styles.historyCard}
+            >
+              <View style={styles.historyHeader}>
+                <Text style={styles.historyName}>
+                  {kayit.ad}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.historyStatus,
+                    {
+                      color:
+                        kayit.islem === 'tuketildi'
+                          ? '#247A43'
+                          : '#B42318',
+                    },
+                  ]}
+                >
+                  {kayit.islem === 'tuketildi'
+                    ? '✓ Tüketildi'
+                    : 'İsraf Edildi'}
+                </Text>
+              </View>
+
+              <Text style={styles.historyDetail}>
+                {miktariGoster(kayit.miktar)} {kayit.birim}
+                {' · '}
+                {kayit.kategori}
+              </Text>
+
+              <Text style={styles.historyDetail}>
+                İşlem tarihi: {islemTarihiniGoster(kayit.islemTarihi)}
+              </Text>
+            </View>
+          ))
+        )}
+      </ScrollView>
+<IstatistikEkrani
+  visible={istatistikAcik}
+  onClose={() => setIstatistikAcik(false)}
+  urunler={urunler}
+  gecmis={gecmis}
+/>
       <KarsilamaEkrani />
     </SafeAreaView>
   );
 }
 
-// Ekran tasarımı
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -827,7 +1114,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     gap: 12,
-    paddingBottom: 40,
+    paddingBottom: 45,
   },
   title: {
     fontSize: 30,
@@ -911,7 +1198,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 8,
   },
-  // YENİ: Ürün adı ve durum etiketi yan yana
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -924,12 +1210,10 @@ const styles = StyleSheet.create({
     color: '#222222',
     flexShrink: 1,
   },
-  // YENİ: Renkli durum etiketi
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 15,
-    flexShrink: 0,
   },
   statusBadgeText: {
     fontSize: 11,
@@ -972,6 +1256,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   editButton: {
     backgroundColor: '#E3F0FF',
@@ -1000,5 +1285,85 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
+  },
+
+  // YENİ: Genel durum sayaçları
+  summaryRow: {
+    flexDirection: 'row',
+    gap: 9,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E3EBE4',
+  },
+  summaryNumber: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: '#666666',
+    marginTop: 5,
+  },
+  greenText: {
+    color: '#247A43',
+  },
+  redText: {
+    color: '#B42318',
+  },
+
+  // YENİ: Tüketim ve israf butonları
+  consumedButton: {
+    backgroundColor: '#247A43',
+  },
+  consumedButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  wastedButton: {
+    backgroundColor: '#FDE0DD',
+  },
+  wastedButtonText: {
+    color: '#B42318',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // YENİ: İşlem geçmişi kartları
+  historyCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3EBE4',
+    borderRadius: 12,
+    padding: 15,
+    gap: 7,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  historyName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#222222',
+    flexShrink: 1,
+  },
+  historyStatus: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  historyDetail: {
+    fontSize: 13,
+    color: '#666666',
   },
 });
