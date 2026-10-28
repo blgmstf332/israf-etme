@@ -1,5 +1,6 @@
 
 import { AlisverisEkrani } from '@/components/alisveris-ekrani';
+import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
 import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
 import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
@@ -737,6 +738,11 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        <AnaSayfaOzeti
+  urunler={urunler}
+  gecmis={gecmis}
+  kalanGun={kalanGun}
+/>
         <Text style={styles.title}>🌿 İsrafEtme</Text>
 
         <Text style={styles.subtitle}>
