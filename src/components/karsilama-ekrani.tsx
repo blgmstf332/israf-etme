@@ -90,8 +90,6 @@ export function KarsilamaEkrani() {
     >
 
       <StatusBar
-        translucent
-        backgroundColor="transparent"
         barStyle="dark-content"
       />
 
