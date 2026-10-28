@@ -3,6 +3,7 @@ import { AlisverisEkrani } from '@/components/alisveris-ekrani';
 import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
 import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
+import { MiktarIslemiModal } from '@/components/miktar-islemi-modal';
 import Storage from 'expo-sqlite/kv-store';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -368,6 +369,16 @@ export default function HomeScreen() {
   });
 
   const [yuklendi, setYuklendi] = useState(false);
+  const [seciliIslem, setSeciliIslem] = useState<{
+  urunId: string;
+  islem: IslemTuru;
+} | null>(null);
+  const [aramaMetni, setAramaMetni] = useState('');
+
+  const [kategoriFiltresi, setKategoriFiltresi] =
+  useState<Kategori | 'Tümü'>('Tümü');
+
+  const [yalnizcaAcil, setYalnizcaAcil] = useState(false);
   const [istatistikAcik, setIstatistikAcik] = useState(false);
   const [alisverisAcik, setAlisverisAcik] = useState(false);
   const [yuklemeHatasi, setYuklemeHatasi] = useState(false);
@@ -464,7 +475,7 @@ export default function HomeScreen() {
   }, [veriler, yuklendi]);
 
   // Ürünleri son tüketim tarihine göre sırala.
-  const siraliUrunler = [...urunler].sort((a, b) => {
+    const siraliUrunler = [...urunler].sort((a, b) => {
     const gunA = kalanGun(a.sonTarih);
     const gunB = kalanGun(b.sonTarih);
 
@@ -477,6 +488,23 @@ export default function HomeScreen() {
 
     return gunA - gunB || a.ad.localeCompare(b.ad, 'tr');
   });
+  const gorunenUrunler = siraliUrunler.filter((urun) => {
+  const aramaUyuyor = urun.ad
+    .toLocaleLowerCase('tr-TR')
+    .includes(aramaMetni.trim().toLocaleLowerCase('tr-TR'));
+
+  const kategoriUyuyor =
+    kategoriFiltresi === 'Tümü' ||
+    urun.kategori === kategoriFiltresi;
+
+  const gun = kalanGun(urun.sonTarih);
+
+  const acilUyuyor =
+    !yalnizcaAcil ||
+    (gun !== null && gun <= 3);
+
+  return aramaUyuyor && kategoriUyuyor && acilUyuyor;
+});
 
   // YENİ: Basit işlem sayaçları
   const tuketilenSayisi = gecmis.filter(
@@ -562,56 +590,83 @@ export default function HomeScreen() {
   };
 
   // YENİ: Ürünü tüketildi veya israf edildi olarak kaydet.
-  const urunTamamla = (urun: Urun, islem: IslemTuru) => {
-    const baslik =
-      islem === 'tuketildi' ? 'Ürün Tüketildi' : 'Ürün İsraf Edildi';
-
-    const aciklama =
-      islem === 'tuketildi'
-        ? `${urun.ad} ürününün tamamını tükettiğini onaylıyor musun?`
-        : `${urun.ad} ürününün tamamının israf edildiğini onaylıyor musun?`;
-
-    Alert.alert(baslik, aciklama, [
-      {
-        text: 'İptal',
-        style: 'cancel',
-      },
-      {
-        text: 'Onayla',
-        onPress: () => {
-          const yeniGecmisKaydi: GecmisKaydi = {
-            ...urun,
-            kayitId: yeniId(),
-            islem,
-            islemTarihi: new Date().toISOString(),
-          };
-
-          setVeriler((onceki) => {
-            // Aynı ürün tekrar işlenmesin.
-            const urunVarMi = onceki.urunler.some(
-              (item) => item.id === urun.id
-            );
-
-            if (!urunVarMi) return onceki;
-
-           return {
-  urunler: onceki.urunler.filter(
-    (item) => item.id !== urun.id
-  ),
-  gecmis: [
-    ...onceki.gecmis,
-    yeniGecmisKaydi,
-  ],
+ // Kullanıcı Tüketildi veya İsraf Edildi butonuna basınca
+// miktar giriş penceresini aç.
+const urunTamamla = (urun: Urun, islem: IslemTuru) => {
+  setSeciliIslem({
+    urunId: urun.id,
+    islem,
+  });
 };
-});
 
-          if (duzenlenenUrunId === urun.id) {
-            duzenlemeyiIptal();
-          }
-        },
-      },
-    ]);
-  };
+// Kullanıcının belirttiği miktarı stoktan düş ve geçmişe kaydet.
+const miktarIsleminiKaydet = (islenenMiktar: number) => {
+  if (seciliIslem === null) return;
+
+  const secim = seciliIslem;
+  const kayitId = yeniId();
+  const islemTarihi = new Date().toISOString();
+
+  setVeriler((onceki) => {
+    const aktifUrun = onceki.urunler.find(
+      (urun) => urun.id === secim.urunId
+    );
+
+    // Ürün silinmişse veya miktar geçersizse işlem yapma.
+    if (
+      !aktifUrun ||
+      !Number.isFinite(islenenMiktar) ||
+      islenenMiktar <= 0 ||
+      islenenMiktar > aktifUrun.miktar
+    ) {
+      return onceki;
+    }
+
+    // Ondalıklı sayı hesaplarındaki küçük farkları gider.
+    // Örn: 0,3 - 0,1 = 0,2
+    const kalanMiktar =
+      Math.round(
+        (aktifUrun.miktar - islenenMiktar) * 1000000
+      ) / 1000000;
+
+    // İşlem geçmişine yalnızca işlenen miktarı kaydet.
+    const yeniGecmisKaydi: GecmisKaydi = {
+      ...aktifUrun,
+      miktar: islenenMiktar,
+      kayitId,
+      islem: secim.islem,
+      islemTarihi,
+    };
+
+    // Ürün tamamen bittiyse stoktan kaldır.
+    // Kısmen kullanıldıysa kalan miktarı güncelle.
+    const guncelUrunler =
+      kalanMiktar <= 0
+        ? onceki.urunler.filter(
+            (urun) => urun.id !== aktifUrun.id
+          )
+        : onceki.urunler.map((urun) =>
+            urun.id === aktifUrun.id
+              ? { ...urun, miktar: kalanMiktar }
+              : urun
+          );
+
+    return {
+      urunler: guncelUrunler,
+      gecmis: [
+        ...onceki.gecmis,
+        yeniGecmisKaydi,
+      ],
+    };
+  });
+
+  // İşlem tamamlandıktan sonra miktar penceresini kapat.
+  setSeciliIslem(null);
+
+  if (duzenlenenUrunId === secim.urunId) {
+    duzenlemeyiIptal();
+  }
+};
 
   // Düzenleme alanını aç.
   const duzenlemeyiBaslat = (urun: Urun) => {
@@ -834,7 +889,67 @@ export default function HomeScreen() {
         <Text style={styles.sortInfo}>
           ⏳ Son tüketim tarihine göre sıralandı
         </Text>
+          {/* Ürün arama */}
+<TextInput
+  style={styles.input}
+  placeholder="🔍 Ürün ara..."
+  value={aramaMetni}
+  onChangeText={setAramaMetni}
+/>
 
+{/* Kategori filtreleri */}
+<Text style={styles.label}>Kategoriye Göre Filtrele</Text>
+
+<ScrollView
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  contentContainerStyle={styles.optionsRow}
+>
+  {(['Tümü', ...KATEGORILER] as const).map((item) => (
+    <TouchableOpacity
+      key={item}
+      style={[
+        styles.optionChip,
+        kategoriFiltresi === item && styles.optionChipActive,
+      ]}
+      onPress={() => setKategoriFiltresi(item)}
+    >
+      <Text
+        style={[
+          styles.optionText,
+          kategoriFiltresi === item && styles.optionTextActive,
+        ]}
+      >
+        {item}
+      </Text>
+    </TouchableOpacity>
+  ))}
+</ScrollView>
+
+{/* Acil ürün filtresi */}
+<TouchableOpacity
+  style={[
+    styles.optionChip,
+    { alignSelf: 'flex-start', marginVertical: 8 },
+    yalnizcaAcil && styles.optionChipActive,
+  ]}
+  onPress={() => setYalnizcaAcil(!yalnizcaAcil)}
+>
+  <Text
+    style={[
+      styles.optionText,
+      yalnizcaAcil && styles.optionTextActive,
+    ]}
+  >
+    {yalnizcaAcil
+      ? '✓ Acil Ürünler'
+      : '⚠️ Yalnızca Acil Ürünler'}
+  </Text>
+</TouchableOpacity>
+
+<Text style={styles.sortInfo}>
+  Gösterilen: {gorunenUrunler.length} / {urunler.length} ürün
+</Text>
         {!yuklendi ? (
           <Text style={styles.emptyText}>
             {yuklemeHatasi
@@ -842,11 +957,15 @@ export default function HomeScreen() {
               : 'Kayıtlı ürünler yükleniyor...'}
           </Text>
         ) : urunler.length === 0 ? (
-          <Text style={styles.emptyText}>
-            Henüz stokta ürün bulunmuyor.
-          </Text>
-        ) : (
-          siraliUrunler.map((urun) => {
+  <Text style={styles.emptyText}>
+    Henüz stokta ürün bulunmuyor.
+  </Text>
+) : gorunenUrunler.length === 0 ? (
+  <Text style={styles.emptyText}>
+    Aramana uygun ürün bulunamadı.
+  </Text>
+) : (
+          gorunenUrunler.map((urun) => {
             const durum = durumBilgisi(urun.sonTarih);
             const renkler = DURUM_RENKLERI[durum.tur];
 
@@ -1130,6 +1249,20 @@ export default function HomeScreen() {
       ],
     }));
   }}
+/>
+
+
+        <MiktarIslemiModal
+  urun={
+    seciliIslem
+      ? urunler.find(
+          (urun) => urun.id === seciliIslem.urunId
+        ) ?? null
+      : null
+  }
+  islem={seciliIslem?.islem ?? null}
+  onClose={() => setSeciliIslem(null)}
+  onConfirm={miktarIsleminiKaydet}
 />
       <KarsilamaEkrani />
     </SafeAreaView>
