@@ -1,12 +1,14 @@
 import { AlisverisEkrani } from '@/components/alisveris-ekrani';
 import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
 import { AyarlarEkrani } from '@/components/ayarlar-ekrani';
+import { BarkodOkuyucu } from '@/components/barkod-okuyucu';
 import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
 import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
 import { MiktarIslemiModal } from '@/components/miktar-islemi-modal';
 import { SonTarihRozeti } from '@/components/son-tarih-rozeti';
 import { UrunDetayEkrani } from '@/components/urun-detay-ekrani';
+import { barkoddanUrunBul } from '@/services/barkod-servisi';
 import { modernStyles } from '@/styles/modern-ui';
 import {
   ALISVERIS_STORAGE_KEY,
@@ -314,6 +316,12 @@ function verileriDuzenle(veri: unknown): UygulamaVerisi {
 export default function HomeScreen() {
   // Ürün ekleme alanları
   const [urunAdi, setUrunAdi] = useState('');
+  // 24. AŞAMA: Barkod okuma
+const [barkodAcik, setBarkodAcik] = useState(false);
+const [barkodAraniyor, setBarkodAraniyor] =
+  useState(false);
+const [sonOkunanBarkod, setSonOkunanBarkod] =
+  useState('');
   const [tarih, setTarih] = useState('');
   const [kategori, setKategori] = useState<Kategori>('Diğer');
   const [miktar, setMiktar] = useState('1');
@@ -774,6 +782,48 @@ const gecmisiCsvPaylas = async () => {
     );
   }
 };
+// 24. AŞAMA: Okunan barkoddan ürün adını bul.
+const barkodIsle = async (barkod: string) => {
+  if (barkodAraniyor) return;
+
+  // Kamera ekranını kapat.
+  setBarkodAcik(false);
+  setBarkodAraniyor(true);
+  setSonOkunanBarkod(barkod);
+
+  try {
+    const bulunanUrun = await barkoddanUrunBul(barkod);
+
+    if (bulunanUrun === null) {
+      Alert.alert(
+        'Ürün Bulunamadı',
+        'Barkod okundu ancak ürün adı veri tabanında bulunamadı. ' +
+        'Ürün adını manuel girebilirsin.\n\n' +
+        'Barkod: ' + barkod
+      );
+      return;
+    }
+
+    // Mevcut ürün ekleme formuna ürün adını yaz.
+    setUrunAdi(bulunanUrun.ad);
+
+    Alert.alert(
+      'Ürün Bulundu',
+      bulunanUrun.ad +
+        '\n\nSon tüketim tarihini ve miktarı kontrol ederek ürünü ekleyebilirsin.'
+    );
+  } catch (hata) {
+    console.error('Barkod sorgulama hatası:', hata);
+
+    Alert.alert(
+      'Bağlantı Hatası',
+      'Ürün bilgisi alınamadı. İnternet bağlantını kontrol et ' +
+      'veya ürün adını manuel gir.'
+    );
+  } finally {
+    setBarkodAraniyor(false);
+  }
+};
   // Yeni ürün ekle.
   const urunEkle = () => {
     if (!yuklendi) return;
@@ -1029,6 +1079,28 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
           yuklendi={yuklendi}
 />
         <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>Yeni Ürün Ekle</Text>
+        {/* 24. AŞAMA: Barkod ile ürün bul */}
+<TouchableOpacity
+  style={[
+    styles.button,
+    modernStyles.anaButon,
+    { backgroundColor: '#225A43' },
+  ]}
+  onPress={() => setBarkodAcik(true)}
+  disabled={barkodAraniyor}
+>
+  <Text style={modernStyles.anaButonYazisi}>
+    {barkodAraniyor
+      ? '🔎 Ürün aranıyor...'
+      : '📷 Barkod Okutarak Ürün Ekle'}
+  </Text>
+</TouchableOpacity>
+
+{sonOkunanBarkod !== '' && (
+  <Text style={styles.sortInfo}>
+    Son okunan barkod: {sonOkunanBarkod}
+  </Text>
+)}
         <Text style={[styles.label, modernStyles.etiket]}>Ürün Adı</Text>
         <TextInput
       style={[styles.input, modernStyles.input]}      
@@ -1615,6 +1687,14 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
         kalanGun={kalanGun}
         onClose={() => setDetayUrunId(null)}
       />
+      {/* 24. AŞAMA: Barkod okuyucu ekranı */}
+<BarkodOkuyucu
+  visible={barkodAcik}
+  onClose={() => setBarkodAcik(false)}
+  onScanned={(barkod) => {
+    void barkodIsle(barkod);
+  }}
+/>
       <KarsilamaEkrani />
     </SafeAreaView>
   );
