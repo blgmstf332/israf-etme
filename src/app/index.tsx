@@ -321,6 +321,14 @@ export default function HomeScreen() {
   islem: IslemTuru;
 } | null>(null);
   const [detayUrunId, setDetayUrunId] = useState<string | null>(null);
+  // 20. AŞAMA: İşlem geçmişi filtreleri
+const [gecmisArama, setGecmisArama] = useState('');
+
+const [gecmisFiltresi, setGecmisFiltresi] =
+  useState<'Tümü' | IslemTuru>('Tümü');
+
+const [tumGecmisiGoster, setTumGecmisiGoster] =
+  useState(false);
   const [aramaMetni, setAramaMetni] = useState('');
   const [kategoriFiltresi, setKategoriFiltresi] =
   useState<Kategori | 'Tümü'>('Tümü');
@@ -429,8 +437,33 @@ export default function HomeScreen() {
   const israfSayisi = gecmis.filter(
     (kayit) => kayit.islem === 'israf'
   ).length;
-  // Son yapılan işlemleri önce göster.
-  const sonIslemler = [...gecmis].reverse().slice(0, 10);
+  // 20. AŞAMA: İşlem geçmişini arama ve türe göre filtrele.
+const filtrelenmisGecmis = [...gecmis]
+  .filter((kayit) => {
+    // Ürün adına göre arama
+    const aramaUyuyor = kayit.ad
+      .toLocaleLowerCase('tr-TR')
+      .includes(
+        gecmisArama.trim().toLocaleLowerCase('tr-TR')
+      );
+
+    // Tümü, Tüketildi veya İsraf Edildi filtresi
+    const islemUyuyor =
+      gecmisFiltresi === 'Tümü' ||
+      kayit.islem === gecmisFiltresi;
+
+    return aramaUyuyor && islemUyuyor;
+  })
+  .sort(
+    (a, b) =>
+      new Date(b.islemTarihi).getTime() -
+      new Date(a.islemTarihi).getTime()
+  );
+
+// Kullanıcının tercihine göre 10 kayıt veya tümünü göster.
+const sonIslemler = tumGecmisiGoster
+  ? filtrelenmisGecmis
+  : filtrelenmisGecmis.slice(0, 10);
   // Yeni ürün ekle.
   const urunEkle = () => {
     if (!yuklendi) return;
@@ -1034,11 +1067,51 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
         <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
           Son İşlemler ({gecmis.length})
         </Text>
-        {gecmis.length === 0 ? (
-          <Text style={styles.emptyText}>
-            Henüz tüketim veya israf kaydı bulunmuyor.
-          </Text>
-        ) : (
+        {/* 20. AŞAMA: İşlem geçmişinde ürün arama */}
+<TextInput
+  style={[styles.input, modernStyles.input]}
+  placeholder="🔍 Geçmişte ürün ara..."
+  value={gecmisArama}
+  onChangeText={setGecmisArama}
+/>
+
+{/* İşlem türüne göre filtreleme */}
+<ScrollView
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  contentContainerStyle={styles.optionsRow}
+>
+  {(['Tümü', 'tuketildi', 'israf'] as const).map((filtre) => (
+    <TouchableOpacity
+      key={filtre}
+      style={[
+        styles.optionChip,
+        gecmisFiltresi === filtre && styles.optionChipActive,
+      ]}
+      onPress={() => setGecmisFiltresi(filtre)}
+    >
+      <Text
+        style={[
+          styles.optionText,
+          gecmisFiltresi === filtre && styles.optionTextActive,
+        ]}
+      >
+        {filtre === 'Tümü'
+          ? 'Tümü'
+          : filtre === 'tuketildi'
+            ? '✓ Tüketildi'
+            : '🗑 İsraf Edildi'}
+      </Text>
+    </TouchableOpacity>
+  ))}
+</ScrollView>
+        {sonIslemler.length === 0 ? (
+  <Text style={styles.emptyText}>
+    {gecmis.length === 0
+      ? 'Henüz tüketim veya israf kaydı bulunmuyor.'
+      : 'Aramana uygun işlem bulunamadı.'}
+  </Text>
+) : (
           sonIslemler.map((kayit) => (
             <TouchableOpacity
               key={kayit.kayitId}
@@ -1079,6 +1152,26 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
             </TouchableOpacity>
           ))
         )}
+        {/* 20. AŞAMA: Tüm geçmişi göster / İlk 10'a dön */}
+{filtrelenmisGecmis.length > 10 && (
+  <TouchableOpacity
+    style={[styles.button, modernStyles.anaButon]}
+    onPress={() =>
+      setTumGecmisiGoster((onceki) => !onceki)
+    }
+  >
+    <Text
+      style={[
+        styles.buttonText,
+        modernStyles.anaButonYazisi,
+      ]}
+    >
+      {tumGecmisiGoster
+        ? '↑ İlk 10 İşlemi Göster'
+        : `↓ Tüm Geçmişi Göster (${filtrelenmisGecmis.length} kayıt)`}
+    </Text>
+  </TouchableOpacity>
+)}
       </ScrollView>
 <IstatistikEkrani
   visible={istatistikAcik}
