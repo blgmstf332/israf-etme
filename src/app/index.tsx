@@ -1,4 +1,14 @@
+
 import { AlisverisEkrani } from '@/components/alisveris-ekrani';
+import {
+  type AktifSekme,
+  type MenuSekmesi
+} from '@/components/alt-menu';
+
+import {
+  AltMenu
+} from '@/components/alt-menu';
+
 import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
 import { AyarlarEkrani } from '@/components/ayarlar-ekrani';
 import { BarkodOkuyucu } from '@/components/barkod-okuyucu';
@@ -355,6 +365,9 @@ const [tumGecmisiGoster, setTumGecmisiGoster] =
   const [istatistikAcik, setIstatistikAcik] = useState(false);
   const [alisverisAcik, setAlisverisAcik] = useState(false);
   const [ayarlarAcik, setAyarlarAcik] = useState(false);
+  // 25. AŞAMA: Seçili ana ekran
+const [aktifSekme, setAktifSekme] =
+  useState<AktifSekme>('ana');
   // 22. AŞAMA: Yedekleme işlemleri
 const [yedeklemeMesgul, setYedeklemeMesgul] = useState(false);
 
@@ -824,6 +837,20 @@ const barkodIsle = async (barkod: string) => {
     setBarkodAraniyor(false);
   }
 };
+// 25. AŞAMA: Alt menü ekran geçişleri
+const sekmeDegistir = (sekme: MenuSekmesi) => {
+  if (sekme === 'istatistik') {
+    setIstatistikAcik(true);
+    return;
+  }
+
+  if (sekme === 'ayarlar') {
+    setAyarlarAcik(true);
+    return;
+  }
+
+  setAktifSekme(sekme);
+};
   // Yeni ürün ekle.
   const urunEkle = () => {
     if (!yuklendi) return;
@@ -1015,10 +1042,14 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-        <AnaSayfaOzeti
+  key={aktifSekme}
+  style={{ flex: 1 }}
+  contentContainerStyle={styles.content}
+  keyboardShouldPersistTaps="handled"
+>
+  {aktifSekme === 'ana' && (
+    <>
+      <AnaSayfaOzeti
   urunler={urunler}
   gecmis={gecmis}
   kalanGun={kalanGun}
@@ -1078,7 +1109,16 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
           urunler={urunler}
           yuklendi={yuklendi}
 />
-        <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>Yeni Ürün Ekle</Text>
+        {/* Ana Sayfa bölümü burada biter. */}
+    </>
+  )}
+
+  {/* Stok ekranı */}
+  {aktifSekme === 'stok' && (
+    <>
+      <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
+        Yeni Ürün Ekle
+      </Text>
         {/* 24. AŞAMA: Barkod ile ürün bul */}
 <TouchableOpacity
   style={[
@@ -1459,7 +1499,21 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
             );
           })
         )}
-        {/* YENİ: İşlem geçmişi */}
+        {/* Stok bölümü burada biter. */}
+    </>
+  )}
+
+  {/* Geçmiş ekranı */}
+  {aktifSekme === 'gecmis' && (
+    <>
+      <Text
+        style={[
+          styles.sectionTitle,
+          modernStyles.bolumBasligi,
+        ]}
+      >
+        📋 İşlem Geçmişim
+      </Text>
         <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
           Son İşlemler ({gecmis.length})
         </Text>
@@ -1631,9 +1685,19 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
 </TouchableOpacity>
 {/* 22. AŞAMA: Yedekleme ve geri yükleme */}
 
-      </ScrollView>
-      {/* 23. AŞAMA: Ayarlar ekranı */}
-    <AyarlarEkrani
+        </>
+  )}
+
+</ScrollView>
+
+{/* 25. AŞAMA: Alt menü */}
+<AltMenu
+  aktifSekme={aktifSekme}
+  onSec={sekmeDegistir}
+/>
+
+{/* 23. AŞAMA: Ayarlar ekranı */}
+<AyarlarEkrani
   visible={ayarlarAcik}
   onClose={() => setAyarlarAcik(false)}
   stokSayisi={urunler.length}
