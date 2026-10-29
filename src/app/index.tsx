@@ -7,6 +7,11 @@ import { MiktarIslemiModal } from '@/components/miktar-islemi-modal';
 import { SonTarihRozeti } from '@/components/son-tarih-rozeti';
 import { UrunDetayEkrani } from '@/components/urun-detay-ekrani';
 import { modernStyles } from '@/styles/modern-ui';
+import {
+  ALISVERIS_STORAGE_KEY,
+  yedekDosyasiSec,
+  yedekOlustur,
+} from '@/utils/yedekleme';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import Storage from 'expo-sqlite/kv-store';
@@ -340,6 +345,12 @@ const [tumGecmisiGoster, setTumGecmisiGoster] =
   const [yalnizcaAcil, setYalnizcaAcil] = useState(false);
   const [istatistikAcik, setIstatistikAcik] = useState(false);
   const [alisverisAcik, setAlisverisAcik] = useState(false);
+  // 22. AŞAMA: Yedekleme işlemleri
+const [yedeklemeMesgul, setYedeklemeMesgul] = useState(false);
+
+// Geri yüklemeden sonra alışveriş ekranını yeniden oluşturur.
+const [alisverisRevizyonu, setAlisverisRevizyonu] =
+  useState(0);
   const [yuklemeHatasi, setYuklemeHatasi] = useState(false);
   // Kayıt işlemlerinin sırasını korur.
   const kayitSirasi = useRef<Promise<void>>(Promise.resolve());
@@ -499,6 +510,181 @@ const filtrelenmisGecmis = [...gecmis]
 const sonIslemler = tumGecmisiGoster
   ? filtrelenmisGecmis
   : filtrelenmisGecmis.slice(0, 10);
+// 22. AŞAMA: Yedek oluşturma
+const yedegiPaylas = async () => {
+  if (!yuklendi || yuklemeHatasi || yedeklemeMesgul) {
+    return;
+  }
+
+  setYedeklemeMesgul(true);
+
+  try {
+    // Önce bekleyen SQLite yazmalarının bitmesini bekle.
+    await kayitSirasi.current;
+
+    await yedekOlustur(veriler);
+  } catch (hata) {
+    console.error('Yedekleme hatası:', hata);
+
+    Alert.alert(
+      'Yedekleme başarısız',
+      'Yedek dosyası oluşturulamadı veya paylaşılamadı.'
+    );
+  } finally {
+    setYedeklemeMesgul(false);
+  }
+};
+
+// Doğrulanan yedeği uygulamaya uygular.
+const yedekVerileriniUygula = async (
+  yeniVeriler: UygulamaVerisi,
+  yeniAlisverisKaydi: string | null
+) => {
+  setYedeklemeMesgul(true);
+
+  try {
+    // Önce önceki stok yazmalarının tamamlanmasını bekle.
+    await kayitSirasi.current;
+
+    // Başarısız olursa geri alabilmek için eski kayıtları sakla.
+    const eskiStokKaydi = await Storage.getItem(STORAGE_KEY);
+    const eskiAlisverisKaydi = await Storage.getItem(
+      ALISVERIS_STORAGE_KEY
+    );
+
+    // Null veriyi anahtar silme, diğerlerini yazma olarak uygula.
+    const kaydiYaz = async (
+      anahtar: string,
+      deger: string | null
+    ) => {
+      if (deger === null) {
+        await Storage.removeItem(anahtar);
+      } else {
+        await Storage.setItem(anahtar, deger);
+      }
+    };
+
+    try {
+      // İlk olarak kalıcı verileri güncelle.
+      await kaydiYaz(
+        STORAGE_KEY,
+        JSON.stringify(yeniVeriler)
+      );
+
+      await kaydiYaz(
+        ALISVERIS_STORAGE_KEY,
+        yeniAlisverisKaydi
+      );
+    } catch (yazmaHatasi) {
+      // Yazma yarıda kalırsa eski verileri geri yüklemeyi dene.
+      const geriAlma = await Promise.allSettled([
+        kaydiYaz(STORAGE_KEY, eskiStokKaydi),
+        kaydiYaz(ALISVERIS_STORAGE_KEY, eskiAlisverisKaydi),
+      ]);
+
+      const geriAlmaHatasi = geriAlma.some(
+        (sonuc) => sonuc.status === 'rejected'
+      );
+
+      if (geriAlmaHatasi) {
+        throw new Error(
+          'Geri yükleme ve eski kayıtları geri alma işlemi başarısız.'
+        );
+      }
+
+      throw yazmaHatasi;
+    }
+
+    // Kalıcı kayıtlar başarılıysa ekranı da güncelle.
+    setVeriler(yeniVeriler);
+
+    // Alışveriş ekranını yeniden oluşturarak yeni kayıtları okut.
+    setAlisverisAcik(false);
+    setAlisverisRevizyonu((onceki) => onceki + 1);
+
+    // Açık ürün detayları ve işlem pencerelerini kapat.
+    setDetayUrunId(null);
+    setSeciliIslem(null);
+
+    Alert.alert(
+      'Geri yükleme başarılı',
+      'Stok, işlem geçmişi ve alışveriş kayıtları geri yüklendi.'
+    );
+  } catch (hata) {
+    console.error('Geri yükleme hatası:', hata);
+
+    const mesaj =
+      hata instanceof Error
+        ? hata.message
+        : 'Beklenmeyen bir hata oluştu.';
+
+    Alert.alert('Geri yükleme başarısız', mesaj);
+  } finally {
+    setYedeklemeMesgul(false);
+  }
+};
+
+// Kullanıcının seçtiği dosyayı doğrula ve onay iste.
+const yedektenGeriYukle = async () => {
+  if (!yuklendi || yuklemeHatasi || yedeklemeMesgul) {
+    return;
+  }
+
+  setYedeklemeMesgul(true);
+
+  try {
+    const secilenYedek = await yedekDosyasiSec();
+
+    if (secilenYedek === null) return;
+
+    // Mevcut doğrulama fonksiyonumuzu yeniden kullanıyoruz.
+    const dogrulananVeriler = verileriDuzenle(
+      secilenYedek.stokVeGecmis
+    );
+
+    const mesaj =
+      'Bu işlem mevcut stok, işlem geçmişi ve ' +
+      'alışveriş listesi kayıtlarının üzerine yazacak.\n\n' +
+      'Yedekteki ürün sayısı: ' +
+      dogrulananVeriler.urunler.length + '\n' +
+      'Yedekteki işlem sayısı: ' +
+      dogrulananVeriler.gecmis.length + '\n\n' +
+      'Devam etmek istiyor musun?';
+
+    Alert.alert(
+      'Yedeği Geri Yükle',
+      mesaj,
+      [
+        {
+          text: 'Vazgeç',
+          style: 'cancel',
+        },
+        {
+          text: 'Geri Yükle',
+          style: 'destructive',
+          onPress: () => {
+            void yedekVerileriniUygula(
+              dogrulananVeriler,
+              secilenYedek.alisverisKaydi
+            );
+          },
+        },
+      ],
+      { cancelable: false }
+    );
+  } catch (hata) {
+    console.error('Yedek dosyası hatası:', hata);
+
+    const mesaj =
+      hata instanceof Error
+        ? hata.message
+        : 'Yedek dosyası okunamadı.';
+
+    Alert.alert('Geçersiz yedek', mesaj);
+  } finally {
+    setYedeklemeMesgul(false);
+  }
+};
   // 21. AŞAMA: Filtrelenmiş işlem geçmişini CSV olarak paylaş.
 const gecmisiCsvPaylas = async () => {
   if (filtrelenmisGecmis.length === 0) {
@@ -1356,6 +1542,54 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
     📄 Geçmişi CSV Olarak Paylaş
   </Text>
 </TouchableOpacity>
+{/* 22. AŞAMA: Yedekleme ve geri yükleme */}
+<View
+  style={{
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DCE9E0',
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 20,
+    gap: 10,
+  }}
+>
+  <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
+    💾 Verilerimi Yönet
+  </Text>
+
+  <Text style={styles.sortInfo}>
+    Ürünlerini, işlem geçmişini ve alışveriş
+    listesini yedekleyebilir veya geri yükleyebilirsin.
+  </Text>
+
+  <TouchableOpacity
+    style={[
+      styles.button,
+      modernStyles.anaButon,
+    ]}
+    onPress={yedegiPaylas}
+    disabled={!yuklendi || yedeklemeMesgul}
+  >
+    <Text style={modernStyles.anaButonYazisi}>
+      📥 Yedek Oluştur
+    </Text>
+  </TouchableOpacity>
+
+  <TouchableOpacity
+    style={[
+      styles.button,
+      modernStyles.anaButon,
+      { backgroundColor: '#315D78' },
+    ]}
+    onPress={yedektenGeriYukle}
+    disabled={!yuklendi || yedeklemeMesgul}
+  >
+    <Text style={modernStyles.anaButonYazisi}>
+      📤 Yedekten Geri Yükle
+    </Text>
+  </TouchableOpacity>
+</View>
       </ScrollView>
 <IstatistikEkrani
   visible={istatistikAcik}
@@ -1364,6 +1598,7 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
   gecmis={gecmis}
 />
 <AlisverisEkrani
+  key={alisverisRevizyonu}
   visible={alisverisAcik}
   onClose={() => setAlisverisAcik(false)}
   stokUrunleri={urunler}
