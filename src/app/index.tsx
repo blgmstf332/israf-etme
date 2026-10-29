@@ -1,5 +1,6 @@
 import { AlisverisEkrani } from '@/components/alisveris-ekrani';
 import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
+import { AyarlarEkrani } from '@/components/ayarlar-ekrani';
 import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
 import { IstatistikEkrani } from '@/components/istatistik-ekrani';
 import { KarsilamaEkrani } from '@/components/karsilama-ekrani';
@@ -345,6 +346,7 @@ const [tumGecmisiGoster, setTumGecmisiGoster] =
   const [yalnizcaAcil, setYalnizcaAcil] = useState(false);
   const [istatistikAcik, setIstatistikAcik] = useState(false);
   const [alisverisAcik, setAlisverisAcik] = useState(false);
+  const [ayarlarAcik, setAyarlarAcik] = useState(false);
   // 22. AŞAMA: Yedekleme işlemleri
 const [yedeklemeMesgul, setYedeklemeMesgul] = useState(false);
 
@@ -971,6 +973,19 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
   gecmis={gecmis}
   kalanGun={kalanGun}
 />
+{/* 23. AŞAMA: Ayarlar ekranını aç */}
+<TouchableOpacity
+  style={[
+    styles.button,
+    modernStyles.anaButon,
+    { backgroundColor: '#315D78' },
+  ]}
+  onPress={() => setAyarlarAcik(true)}
+>
+  <Text style={modernStyles.anaButonYazisi}>
+    ⚙️ Ayarlar
+  </Text>
+</TouchableOpacity>
         {/* YENİ: Stok ve işlem özeti */}
         <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>Genel Durum</Text>
         <View style={styles.summaryRow}>
@@ -1543,54 +1558,18 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
   </Text>
 </TouchableOpacity>
 {/* 22. AŞAMA: Yedekleme ve geri yükleme */}
-<View
-  style={{
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#DCE9E0',
-    borderRadius: 18,
-    padding: 16,
-    marginTop: 20,
-    gap: 10,
-  }}
->
-  <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
-    💾 Verilerimi Yönet
-  </Text>
 
-  <Text style={styles.sortInfo}>
-    Ürünlerini, işlem geçmişini ve alışveriş
-    listesini yedekleyebilir veya geri yükleyebilirsin.
-  </Text>
-
-  <TouchableOpacity
-    style={[
-      styles.button,
-      modernStyles.anaButon,
-    ]}
-    onPress={yedegiPaylas}
-    disabled={!yuklendi || yedeklemeMesgul}
-  >
-    <Text style={modernStyles.anaButonYazisi}>
-      📥 Yedek Oluştur
-    </Text>
-  </TouchableOpacity>
-
-  <TouchableOpacity
-    style={[
-      styles.button,
-      modernStyles.anaButon,
-      { backgroundColor: '#315D78' },
-    ]}
-    onPress={yedektenGeriYukle}
-    disabled={!yuklendi || yedeklemeMesgul}
-  >
-    <Text style={modernStyles.anaButonYazisi}>
-      📤 Yedekten Geri Yükle
-    </Text>
-  </TouchableOpacity>
-</View>
       </ScrollView>
+      {/* 23. AŞAMA: Ayarlar ekranı */}
+    <AyarlarEkrani
+  visible={ayarlarAcik}
+  onClose={() => setAyarlarAcik(false)}
+  stokSayisi={urunler.length}
+  islemSayisi={gecmis.length}
+  onYedekle={yedegiPaylas}
+  onGeriYukle={yedektenGeriYukle}
+  yedeklemeMesgul={yedeklemeMesgul}
+        />
 <IstatistikEkrani
   visible={istatistikAcik}
   onClose={() => setIstatistikAcik(false)}
