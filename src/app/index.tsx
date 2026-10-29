@@ -7,6 +7,8 @@ import { MiktarIslemiModal } from '@/components/miktar-islemi-modal';
 import { SonTarihRozeti } from '@/components/son-tarih-rozeti';
 import { UrunDetayEkrani } from '@/components/urun-detay-ekrani';
 import { modernStyles } from '@/styles/modern-ui';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import Storage from 'expo-sqlite/kv-store';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -326,6 +328,9 @@ const [gecmisArama, setGecmisArama] = useState('');
 
 const [gecmisFiltresi, setGecmisFiltresi] =
   useState<'Tümü' | IslemTuru>('Tümü');
+  // 21. AŞAMA: İşlem geçmişi için tarih filtresi
+const [gecmisTarihFiltresi, setGecmisTarihFiltresi] =
+  useState<'Tümü' | 'Son 7 Gün' | 'Son 30 Gün' | 'Bu Ay'>('Tümü');
 
 const [tumGecmisiGoster, setTumGecmisiGoster] =
   useState(false);
@@ -437,22 +442,52 @@ const [tumGecmisiGoster, setTumGecmisiGoster] =
   const israfSayisi = gecmis.filter(
     (kayit) => kayit.islem === 'israf'
   ).length;
-  // 20. AŞAMA: İşlem geçmişini arama ve türe göre filtrele.
+  // 21. AŞAMA: Arama, işlem türü ve tarih filtreleme
 const filtrelenmisGecmis = [...gecmis]
   .filter((kayit) => {
-    // Ürün adına göre arama
+
+    // 1. Ürün adına göre arama
     const aramaUyuyor = kayit.ad
       .toLocaleLowerCase('tr-TR')
       .includes(
         gecmisArama.trim().toLocaleLowerCase('tr-TR')
       );
 
-    // Tümü, Tüketildi veya İsraf Edildi filtresi
+    // 2. Tüketildi / İsraf Edildi filtresi
     const islemUyuyor =
       gecmisFiltresi === 'Tümü' ||
       kayit.islem === gecmisFiltresi;
 
-    return aramaUyuyor && islemUyuyor;
+    // 3. Tarih filtresi
+    let tarihUyuyor = true;
+
+    if (gecmisTarihFiltresi !== 'Tümü') {
+      const simdi = new Date();
+      const islemTarihi = new Date(kayit.islemTarihi);
+
+      // Bugünün gece 00:00 başlangıcı
+      const baslangic = new Date(
+        simdi.getFullYear(),
+        simdi.getMonth(),
+        simdi.getDate()
+      );
+
+      if (gecmisTarihFiltresi === 'Son 7 Gün') {
+        baslangic.setDate(baslangic.getDate() - 6);
+      } else if (gecmisTarihFiltresi === 'Son 30 Gün') {
+        baslangic.setDate(baslangic.getDate() - 29);
+      } else if (gecmisTarihFiltresi === 'Bu Ay') {
+        baslangic.setDate(1);
+      }
+
+      tarihUyuyor =
+        !Number.isNaN(islemTarihi.getTime()) &&
+        islemTarihi >= baslangic &&
+        islemTarihi <= simdi;
+    }
+
+    // Üç koşulun da sağlanması gerekiyor.
+    return aramaUyuyor && islemUyuyor && tarihUyuyor;
   })
   .sort(
     (a, b) =>
@@ -464,6 +499,93 @@ const filtrelenmisGecmis = [...gecmis]
 const sonIslemler = tumGecmisiGoster
   ? filtrelenmisGecmis
   : filtrelenmisGecmis.slice(0, 10);
+  // 21. AŞAMA: Filtrelenmiş işlem geçmişini CSV olarak paylaş.
+const gecmisiCsvPaylas = async () => {
+  if (filtrelenmisGecmis.length === 0) {
+    Alert.alert(
+      'Kayıt bulunamadı',
+      'Dışa aktarılacak işlem bulunmuyor.'
+    );
+    return;
+  }
+
+  try {
+    const paylasimVar = await Sharing.isAvailableAsync();
+
+    if (!paylasimVar) {
+      Alert.alert(
+        'Paylaşım kullanılamıyor',
+        'Bu cihazda dosya paylaşımı desteklenmiyor.'
+      );
+      return;
+    }
+
+    // CSV alanlarını güvenli ve düzgün biçimde hazırla.
+    const csvHucre = (deger: string | number) => {
+      const metin = String(deger);
+
+      // Excel'de ürün adlarının formül olarak çalışmasını engelle.
+      const guvenliMetin = /^[\s]*[=+\-@]/.test(metin)
+        ? "'" + metin
+        : metin;
+
+      return '"' + guvenliMetin.replace(/"/g, '""') + '"';
+    };
+
+    const basliklar = [
+      'Ürün Adı',
+      'İşlem Türü',
+      'Miktar',
+      'Birim',
+      'Kategori',
+      'İşlem Tarihi',
+    ];
+
+    const satirlar = filtrelenmisGecmis.map((kayit) => {
+      const bilgiler = [
+        kayit.ad,
+        kayit.islem === 'tuketildi'
+          ? 'Tüketildi'
+          : 'İsraf Edildi',
+        miktariGoster(kayit.miktar),
+        kayit.birim,
+        kayit.kategori,
+        islemTarihiniGoster(kayit.islemTarihi),
+      ];
+
+      return bilgiler.map(csvHucre).join(';');
+    });
+
+    // UTF-8 BOM, Türkçe karakterlerin Excel'de doğru
+    // görüntülenmesine yardımcı olur.
+    const csvIcerigi =
+      '\uFEFF' +
+      [
+        basliklar.map(csvHucre).join(';'),
+        ...satirlar,
+      ].join('\r\n');
+
+    const dosya = new File(
+      Paths.cache,
+      `israfetme-gecmis-${Date.now()}.csv`
+    );
+
+    dosya.create();
+    await dosya.write(csvIcerigi);
+
+    await Sharing.shareAsync(dosya.uri, {
+      mimeType: 'text/csv',
+      dialogTitle: 'İsrafEtme İşlem Geçmişi',
+    });
+  } catch (hata) {
+    console.error('CSV paylaşım hatası:', hata);
+
+    Alert.alert(
+      'Hata',
+      'İşlem geçmişi dışa aktarılamadı.'
+    );
+  }
+};
   // Yeni ürün ekle.
   const urunEkle = () => {
     if (!yuklendi) return;
@@ -503,6 +625,7 @@ const sonIslemler = tumGecmisiGoster
     setMiktar('1');
     setBirim('Adet');
   };
+
   // Ürün silme: İşlem geçmişine eklemez.
   const urunSil = (urunId: string) => {
     Alert.alert(
@@ -1105,6 +1228,46 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
     </TouchableOpacity>
   ))}
 </ScrollView>
+{/* 21. AŞAMA: Tarihe göre filtreleme */}
+<Text style={[styles.label, modernStyles.etiket]}>
+  📅 İşlem Tarihine Göre Filtrele
+</Text>
+
+<ScrollView
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  contentContainerStyle={styles.optionsRow}
+>
+  {(['Tümü', 'Son 7 Gün', 'Son 30 Gün', 'Bu Ay'] as const).map(
+    (filtre) => (
+      <TouchableOpacity
+        key={filtre}
+        style={[
+          styles.optionChip,
+          modernStyles.filtre,
+          gecmisTarihFiltresi === filtre &&
+            modernStyles.filtreSecili,
+        ]}
+        onPress={() => setGecmisTarihFiltresi(filtre)}
+      >
+        <Text
+          style={[
+            styles.optionText,
+            modernStyles.filtreYazisi,
+            gecmisTarihFiltresi === filtre &&
+              modernStyles.filtreSeciliYazisi,
+          ]}
+        >
+          {filtre}
+        </Text>
+      </TouchableOpacity>
+    )
+  )}
+</ScrollView>
+
+<Text style={styles.sortInfo}>
+  Filtreye uygun {filtrelenmisGecmis.length} işlem bulundu.
+</Text>
         {sonIslemler.length === 0 ? (
   <Text style={styles.emptyText}>
     {gecmis.length === 0
@@ -1172,6 +1335,27 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
     </Text>
   </TouchableOpacity>
 )}
+{/* 21. AŞAMA: CSV dışa aktarma butonu */}
+<TouchableOpacity
+  style={[
+    styles.button,
+    modernStyles.anaButon,
+    {
+      backgroundColor: '#225A43',
+      marginTop: 10,
+    },
+  ]}
+  onPress={gecmisiCsvPaylas}
+>
+  <Text
+    style={[
+      styles.buttonText,
+      modernStyles.anaButonYazisi,
+    ]}
+  >
+    📄 Geçmişi CSV Olarak Paylaş
+  </Text>
+</TouchableOpacity>
       </ScrollView>
 <IstatistikEkrani
   visible={istatistikAcik}
