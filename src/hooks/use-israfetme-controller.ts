@@ -29,6 +29,7 @@ import {
   type Urun,
   type GecmisKaydi,
   type UygulamaVerisi,
+  type SatinAlmaKaydi,
 } from '@/utils/urun-veri-modeli';
 
 export function useIsrafetmeController() {
@@ -53,6 +54,12 @@ const [sonOkunanBarkod, setSonOkunanBarkod] =
   const [kategori, setKategori] = useState<Kategori>('Diğer');
   const [miktar, setMiktar] = useState('1');
   const [birim, setBirim] = useState<Birim>('Adet');
+  const [satinAlindi, setSatinAlindi] = useState(false);
+  const [satinAlmaTarihi, setSatinAlmaTarihi] = useState(() => {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+  });
+  const [satinAlmaFiyati, setSatinAlmaFiyati] = useState('');
   const [seciliIslem, setSeciliIslem] = useState<{
   urunId: string;
   islem: IslemTuru;
@@ -501,6 +508,19 @@ const barkodIsle = async (barkod: string) => {
       );
       return;
     }
+    const duzenliSatinAlmaTarihi = satinAlindi ? tarihiDuzenle(satinAlmaTarihi) : null;
+    if (satinAlindi && (duzenliSatinAlmaTarihi === null ||
+      duzenliSatinAlmaTarihi > `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`)) {
+      Alert.alert('Hatalı satın alma tarihi', 'Geçerli ve gelecekte olmayan bir satın alma tarihi gir.');
+      return;
+    }
+    const fiyatMetni = satinAlmaFiyati.trim().replace(',', '.');
+    const fiyat = fiyatMetni === '' ? undefined : Number(fiyatMetni);
+    if (satinAlindi && fiyat !== undefined &&
+      (!/^\d+(?:[.]\d{1,2})?$/.test(fiyatMetni) || !Number.isFinite(fiyat) || fiyat < 0)) {
+      Alert.alert('Hatalı fiyat', 'TL fiyatı boş bırak veya örneğin 49,90 gir.');
+      return;
+    }
     const yeniUrun: Urun = {
       id: yeniId(),
       ad: temizAd,
@@ -510,15 +530,23 @@ const barkodIsle = async (barkod: string) => {
       birim,
       eklenmeTarihi: new Date().toISOString(),
     };
+    const satinAlma: SatinAlmaKaydi | null = satinAlindi && duzenliSatinAlmaTarihi ? {
+      id: yeniId(), urunId: yeniUrun.id, ad: temizAd, kategori,
+      miktar: duzenliMiktar, birim, satinAlmaTarihi: duzenliSatinAlmaTarihi,
+      sonTarih: duzenliTarih, toplamFiyat: fiyat,
+    } : null;
     setVeriler((onceki) => ({
       ...onceki,
       urunler: [...onceki.urunler, yeniUrun],
+      satinAlmalar: satinAlma ? [...onceki.satinAlmalar, satinAlma] : onceki.satinAlmalar,
     }));
     setUrunAdi('');
     setTarih('');
     setKategori('Diğer');
     setMiktar('1');
     setBirim('Adet');
+    setSatinAlmaFiyati('');
+    setSatinAlindi(false);
   };
 
   // Ürün silme: İşlem geçmişine eklemez.
@@ -601,6 +629,7 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
               : urun
           );
     return {
+      ...onceki,
       urunler: guncelUrunler,
       gecmis: [
         ...onceki.gecmis,
@@ -691,6 +720,13 @@ const miktarIsleminiKaydet = (islenenMiktar: number) => {
     setMiktar,
     birim,
     setBirim,
+    satinAlindi,
+    setSatinAlindi,
+    satinAlmaTarihi,
+    setSatinAlmaTarihi,
+    satinAlmaFiyati,
+    setSatinAlmaFiyati,
+    satinAlmalar: veriler.satinAlmalar,
     seciliIslem,
     setSeciliIslem,
     detayUrunId,

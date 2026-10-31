@@ -30,9 +30,21 @@ export type GecmisKaydi = Urun & {
   islemTarihi: string;
 };
 // YENİ: Uygulamanın kalıcı verileri
+export type SatinAlmaKaydi = {
+  id: string;
+  urunId: string;
+  ad: string;
+  kategori: Kategori;
+  miktar: number;
+  birim: Birim;
+  satinAlmaTarihi: string; // YYYY-MM-DD
+  sonTarih: string;
+  toplamFiyat?: number; // TL; yoksa bilinmiyor
+};
 export type UygulamaVerisi = {
   urunler: Urun[];
   gecmis: GecmisKaydi[];
+  satinAlmalar: SatinAlmaKaydi[];
 };
 export type DurumTuru =
   | 'gecmis'
@@ -267,6 +279,30 @@ export function gecmisiDuzenle(veri: unknown): GecmisKaydi[] {
     };
   });
 }
+// 29B: Eski yedeklerin satinAlmalar alanı olmamasını destekle.
+export function satinAlmalariDuzenle(veri: unknown): SatinAlmaKaydi[] {
+  if (veri === undefined) return [];
+  if (!Array.isArray(veri)) throw new Error('Satın alma geçmişi geçersiz.');
+  return veri.map((kayit: unknown) => {
+    if (typeof kayit !== 'object' || kayit === null) throw new Error('Satın alma kaydı geçersiz.');
+    const n = kayit as Record<string, unknown>;
+    const birim = BIRIMLER.find((b) => b === n.birim);
+    const kategori = KATEGORILER.find((k) => k === n.kategori);
+    if (typeof n.id !== 'string' || typeof n.urunId !== 'string' ||
+        typeof n.ad !== 'string' || typeof n.satinAlmaTarihi !== 'string' ||
+        typeof n.sonTarih !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(n.satinAlmaTarihi) ||
+        !birim || !kategori || typeof n.miktar !== 'number' ||
+        !Number.isFinite(n.miktar) || n.miktar <= 0 ||
+        (n.toplamFiyat !== undefined &&
+          (typeof n.toplamFiyat !== 'number' || !Number.isFinite(n.toplamFiyat) || n.toplamFiyat < 0))) {
+      throw new Error('Satın alma kaydı alanları geçersiz.');
+    }
+    return { id: n.id, urunId: n.urunId, ad: n.ad,
+      satinAlmaTarihi: n.satinAlmaTarihi, sonTarih: n.sonTarih,
+      miktar: n.miktar, birim, kategori,
+      toplamFiyat: n.toplamFiyat as number | undefined };
+  });
+}
 // YENİ: Kaydedilen uygulama verisini doğrular.
 export function verileriDuzenle(veri: unknown): UygulamaVerisi {
   if (
@@ -280,5 +316,6 @@ export function verileriDuzenle(veri: unknown): UygulamaVerisi {
   return {
     urunler: kayitlariDuzenle(kayit.urunler),
     gecmis: gecmisiDuzenle(kayit.gecmis),
+    satinAlmalar: satinAlmalariDuzenle(kayit.satinAlmalar),
   };
 }

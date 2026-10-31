@@ -1,4 +1,5 @@
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { modernStyles } from '@/styles/modern-ui';
 import { styles } from '@/styles/israfetme-styles';
 import { miktariGoster, islemTarihiniGoster } from '@/utils/urun-veri-modeli';
@@ -7,10 +8,11 @@ import type { useIsrafetmeController } from '@/hooks/use-israfetme-controller';
 type Controller = ReturnType<typeof useIsrafetmeController>;
 
 export function GecmisIcerik({ c }: { c: Controller }) {
+  const router = useRouter();
   const {
     gecmis, gecmisArama, setGecmisArama, gecmisFiltresi, setGecmisFiltresi,
     gecmisTarihFiltresi, setGecmisTarihFiltresi, filtrelenmisGecmis,
-    sonIslemler, setDetayUrunId, tumGecmisiGoster, setTumGecmisiGoster,
+    sonIslemler, tumGecmisiGoster, setTumGecmisiGoster,
     gecmisiCsvPaylas,
   } = c;
 
@@ -116,7 +118,7 @@ export function GecmisIcerik({ c }: { c: Controller }) {
             <TouchableOpacity
               key={kayit.kayitId}
               style={styles.historyCard}
-              onPress={() => setDetayUrunId(kayit.id)}
+              onPress={() => router.push({ pathname: '/urun/[id]', params: { id: kayit.id } })}
               accessibilityRole="button"
               accessibilityLabel={`${kayit.ad} ürününün işlem geçmişini aç`}
             >

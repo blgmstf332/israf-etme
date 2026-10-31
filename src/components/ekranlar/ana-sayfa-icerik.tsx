@@ -1,4 +1,5 @@
 import { Text, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
 import { BildirimYoneticisi } from '@/components/bildirim-yoneticisi';
@@ -10,13 +11,13 @@ import { kalanGun } from '@/utils/urun-veri-modeli';
 type Controller = ReturnType<typeof useIsrafetmeController>;
 
 export function AnaSayfaIcerik({ c }: { c: Controller }) {
+  const router = useRouter();
   const {
     urunler,
     gecmis,
     tuketilenSayisi,
     israfSayisi,
     yuklendi,
-    setAlisverisAcik,
   } = c;
 
   return (
@@ -51,10 +52,19 @@ export function AnaSayfaIcerik({ c }: { c: Controller }) {
 
       <TouchableOpacity
         style={[styles.button, modernStyles.anaButon]}
-        onPress={() => setAlisverisAcik(true)}
+        onPress={() => router.push('/alisveris')}
       >
         <Text style={[styles.buttonText, modernStyles.anaButonYazisi]}>
           🛒 Alışveriş Listem
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.button, modernStyles.anaButon, { backgroundColor: '#174D3A' }]}
+        onPress={() => router.push('/akilli-asistan')}
+      >
+        <Text style={[styles.buttonText, modernStyles.anaButonYazisi]}>
+          📊 Akıllı İsraf ve Alışveriş Asistanı
         </Text>
       </TouchableOpacity>
 

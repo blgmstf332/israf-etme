@@ -39,6 +39,7 @@ export function UygulamaProvider({
     useState<UygulamaVerisi>({
       urunler: [],
       gecmis: [],
+      satinAlmalar: [],
     });
 
   const [yuklendi, setYuklendi] = useState(false);
@@ -79,6 +80,7 @@ export function UygulamaProvider({
           setVeriler({
             urunler: eskiUrunler,
             gecmis: [],
+            satinAlmalar: [],
           });
         }
 

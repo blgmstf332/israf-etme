@@ -1,4 +1,5 @@
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SonTarihRozeti } from '@/components/son-tarih-rozeti';
 import { modernStyles } from '@/styles/modern-ui';
 import { styles } from '@/styles/israfetme-styles';
@@ -11,6 +12,7 @@ import type { useIsrafetmeController } from '@/hooks/use-israfetme-controller';
 type Controller = ReturnType<typeof useIsrafetmeController>;
 
 export function StokIcerik({ c }: { c: Controller }) {
+  const router = useRouter();
   const {
     urunAdi, setUrunAdi, barkodAraniyor, setBarkodAcik, sonOkunanBarkod,
     tarih, setTarih, kategori, setKategori, miktar, setMiktar, birim, setBirim,
@@ -20,7 +22,9 @@ export function StokIcerik({ c }: { c: Controller }) {
     duzenlemeTarihi, setDuzenlemeTarihi, duzenlemeKategorisi,
     setDuzenlemeKategorisi, duzenlemeMiktari, setDuzenlemeMiktari,
     duzenlemeBirimi, setDuzenlemeBirimi, duzenlemeyiIptal, duzenlemeyiKaydet,
-    setDetayUrunId, urunTamamla, duzenlemeyiBaslat, urunSil,
+    urunTamamla, duzenlemeyiBaslat, urunSil,
+    satinAlindi, setSatinAlindi, satinAlmaTarihi, setSatinAlmaTarihi,
+    satinAlmaFiyati, setSatinAlmaFiyati, satinAlmalar,
   } = c;
 
   return (
@@ -126,6 +130,23 @@ export function StokIcerik({ c }: { c: Controller }) {
             </TouchableOpacity>
           ))}
         </ScrollView>
+        {/* 29B - İsteğe bağlı ve gerçek satın alma kaydı */}
+        <TouchableOpacity
+          style={[styles.optionChip, { alignSelf: 'flex-start', marginTop: 10 }]}
+          onPress={() => setSatinAlindi(!satinAlindi)}>
+          <Text style={styles.optionText}>{satinAlindi ? '☑' : '☐'} Bu ürünü satın aldım (alışveriş kaydı oluştur)</Text>
+        </TouchableOpacity>
+        {satinAlindi && (
+          <View style={{ gap: 8, padding: 12, backgroundColor: '#EAF5ED', borderRadius: 10 }}>
+            <Text style={styles.label}>Satın alma tarihi</Text>
+            <TextInput style={[styles.input, modernStyles.input]} placeholder="GG.AA.YYYY"
+              value={satinAlmaTarihi} onChangeText={setSatinAlmaTarihi} />
+            <Text style={styles.label}>Toplam alışveriş fiyatı (TL, isteğe bağlı)</Text>
+            <TextInput style={[styles.input, modernStyles.input]} placeholder="Örn: 49,90"
+              keyboardType="decimal-pad" value={satinAlmaFiyati} onChangeText={setSatinAlmaFiyati} />
+            <Text style={styles.sortInfo}>Alınan miktar, birim ve ürün adı yukarıdaki formdan alınır. Fiyat ürünün toplam fiyatıdır.</Text>
+          </View>
+        )}
         <TouchableOpacity
           style={[
             styles.button,
@@ -139,6 +160,17 @@ export function StokIcerik({ c }: { c: Controller }) {
             {yuklendi ? '+ Ürün Ekle' : 'Veriler yükleniyor...'}
           </Text>
         </TouchableOpacity>
+        <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
+          Satın Alma Geçmişi ({satinAlmalar.length})
+        </Text>
+        <Text style={styles.sortInfo}>En yeni 10 kayıt • Yalnızca “Bu ürünü satın aldım” seçilen ürünler kaydedilir.</Text>
+        {[...satinAlmalar].sort((a,b) => b.satinAlmaTarihi.localeCompare(a.satinAlmaTarihi)).slice(0,10).map((kayit) => (
+          <View key={kayit.id} style={[styles.card, { backgroundColor: '#FFFFFF', borderColor: '#DCE8DD' }]}>
+            <Text style={{ fontWeight: '700', fontSize: 15 }}>{kayit.ad}</Text>
+            <Text style={styles.sortInfo}>{tarihiGoster(kayit.satinAlmaTarihi)} · {miktariGoster(kayit.miktar)} {kayit.birim}</Text>
+            <Text style={styles.sortInfo}>Toplam fiyat: {kayit.toplamFiyat === undefined ? 'Girilmedi' : `${kayit.toplamFiyat.toFixed(2)} TL`}</Text>
+          </View>
+        ))}
         <Text style={[styles.sectionTitle, modernStyles.bolumBasligi]}>
           Ürünlerim ({urunler.length})
         </Text>
@@ -349,7 +381,7 @@ export function StokIcerik({ c }: { c: Controller }) {
                     </Text>
                     <TouchableOpacity
                       style={styles.detailButton}
-                      onPress={() => setDetayUrunId(urun.id)}
+                      onPress={() => router.push({ pathname: '/urun/[id]', params: { id: urun.id } })}
                       accessibilityRole="button"
                       accessibilityLabel={`${urun.ad} ürün detayları ve stok hareketleri`}
                     >
