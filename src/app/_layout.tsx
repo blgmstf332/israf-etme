@@ -1,5 +1,6 @@
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { UygulamaProvider } from '@/context/uygulama-context';
 
 import {
   DarkTheme,
@@ -26,11 +27,10 @@ export default function RootLayout() {
     >
       <AnimatedSplashOverlay />
 
-      <Stack
-        screenOptions={{
-          headerShown: false,
-        }}
-      />
+      <UygulamaProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </UygulamaProvider>
+
     </ThemeProvider>
   );
 }

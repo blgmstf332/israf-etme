@@ -8,6 +8,7 @@ import {
 import {
   AltMenu
 } from '@/components/alt-menu';
+import { useUygulama } from '@/context/uygulama-context';
 
 import { AnaSayfaOzeti } from '@/components/ana-sayfa-ozeti';
 import { AyarlarEkrani } from '@/components/ayarlar-ekrani';
@@ -21,6 +22,27 @@ import { UrunDetayEkrani } from '@/components/urun-detay-ekrani';
 import { barkoddanUrunBul } from '@/services/barkod-servisi';
 import { modernStyles } from '@/styles/modern-ui';
 import {
+  BIRIMLER,
+  DURUM_RENKLERI,
+  durumBilgisi,
+  islemTarihiniGoster,
+  kalanGun,
+  KATEGORILER,
+  miktariDuzenle,
+  miktariGoster,
+  STORAGE_KEY,
+  tarihiDuzenle,
+  tarihiGoster,
+  verileriDuzenle,
+  yeniId,
+  type Birim,
+  type GecmisKaydi,
+  type IslemTuru,
+  type Kategori,
+  type Urun,
+  type UygulamaVerisi,
+} from '@/utils/urun-veri-modeli';
+import {
   ALISVERIS_STORAGE_KEY,
   yedekDosyasiSec,
   yedekOlustur,
@@ -28,7 +50,7 @@ import {
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import Storage from 'expo-sqlite/kv-store';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -39,291 +61,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-// Eski kayıtlar ve yeni kayıtlar için ayrı anahtarlar
-const ESKI_STORAGE_KEY = 'israfetme_urunler_v1';
-const STORAGE_KEY = 'israfetme_veriler_v2';
-const KATEGORILER = [
-  'Süt Ürünleri',
-  'Sebze & Meyve',
-  'Et & Balık',
-  'Bakliyat & Tahıl',
-  'İçecek',
-  'Diğer',
-] as const;
-const BIRIMLER = ['Adet', 'kg', 'g', 'L', 'mL'] as const;
-type Kategori = (typeof KATEGORILER)[number];
-type Birim = (typeof BIRIMLER)[number];
-type Urun = {
-  id: string;
-  ad: string;
-  sonTarih: string;
-  kategori: Kategori;
-  miktar: number;
-  birim: Birim;
-  eklenmeTarihi?: string;
-};
-// YENİ: Bir ürünün nasıl değerlendirildiğini tutar.
-type IslemTuru = 'tuketildi' | 'israf';
-// YENİ: İşlem geçmişindeki kayıt
-type GecmisKaydi = Urun & {
-  kayitId: string;
-  islem: IslemTuru;
-  islemTarihi: string;
-};
-// YENİ: Uygulamanın kalıcı verileri
-type UygulamaVerisi = {
-  urunler: Urun[];
-  gecmis: GecmisKaydi[];
-};
-type DurumTuru =
-  | 'gecmis'
-  | 'yaklasan'
-  | 'normal'
-  | 'gecersiz';
-const DURUM_RENKLERI = {
-  gecmis: {
-    arkaPlan: '#FFF0EF',
-    kenar: '#F5C4C0',
-    metin: '#B42318',
-    etiket: '#FDE0DD',
-  },
-  yaklasan: {
-    arkaPlan: '#FFF5E6',
-    kenar: '#F4D1A2',
-    metin: '#A56112',
-    etiket: '#FFE5BC',
-  },
-  normal: {
-    arkaPlan: '#EDF8EE',
-    kenar: '#B9DEC3',
-    metin: '#247A43',
-    etiket: '#D7EFDC',
-  },
-  gecersiz: {
-    arkaPlan: '#F2F2F2',
-    kenar: '#CCCCCC',
-    metin: '#666666',
-    etiket: '#E5E5E5',
-  },
-};
-// Benzersiz kayıt kimliği oluşturur.
-function yeniId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-// Girilen tarihi YYYY-AA-GG biçimine çevirir.
-function tarihiDuzenle(giris: string): string | null {
-  const parcalar = giris.trim().split(/\D+/);
-  if (parcalar.length !== 3) return null;
-  let gunMetni: string;
-  let ayMetni: string;
-  let yilMetni: string;
-  if (parcalar[0].length === 4) {
-    [yilMetni, ayMetni, gunMetni] = parcalar;
-  } else {
-    [gunMetni, ayMetni, yilMetni] = parcalar;
-  }
-  if (
-    gunMetni.length < 1 ||
-    gunMetni.length > 2 ||
-    ayMetni.length < 1 ||
-    ayMetni.length > 2 ||
-    yilMetni.length !== 4
-  ) {
-    return null;
-  }
-  const gun = Number(gunMetni);
-  const ay = Number(ayMetni);
-  const yil = Number(yilMetni);
-  const kontrol = new Date(Date.UTC(yil, ay - 1, gun));
-  if (
-    yil < 1000 ||
-    kontrol.getUTCFullYear() !== yil ||
-    kontrol.getUTCMonth() !== ay - 1 ||
-    kontrol.getUTCDate() !== gun
-  ) {
-    return null;
-  }
-  return `${yil}-${String(ay).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
-}
-function tarihiGoster(tarih: string): string {
-  return tarih.split('-').reverse().join('.');
-}
-// Son tüketim tarihine kalan gün sayısı
-function kalanGun(tarih: string): number | null {
-  const eslesme = /^(\d{4})-(\d{2})-(\d{2})$/.exec(tarih);
-  if (!eslesme) return null;
-  const yil = Number(eslesme[1]);
-  const ay = Number(eslesme[2]);
-  const gun = Number(eslesme[3]);
-  const hedef = new Date(Date.UTC(yil, ay - 1, gun));
-  if (
-    hedef.getUTCFullYear() !== yil ||
-    hedef.getUTCMonth() !== ay - 1 ||
-    hedef.getUTCDate() !== gun
-  ) {
-    return null;
-  }
-  const bugun = new Date();
-  const bugunUTC = Date.UTC(
-    bugun.getFullYear(),
-    bugun.getMonth(),
-    bugun.getDate()
-  );
-  return Math.round(
-    (hedef.getTime() - bugunUTC) / (24 * 60 * 60 * 1000)
-  );
-}
-// Tarih durumunu belirler.
-function durumBilgisi(tarih: string): {
-  metin: string;
-  tur: DurumTuru;
-  etiket: string;
-} {
-  const gun = kalanGun(tarih);
-  if (gun === null) {
-    return {
-      metin: 'Geçersiz tarih',
-      tur: 'gecersiz',
-      etiket: 'Kontrol gerekli',
-    };
-  }
-  if (gun < 0) {
-    return {
-      metin: `Son tüketim tarihi ${Math.abs(gun)} gün önce geçti`,
-      tur: 'gecmis',
-      etiket: 'Tarihi geçmiş',
-    };
-  }
-  if (gun === 0) {
-    return {
-      metin: 'Bugün son gün!',
-      tur: 'yaklasan',
-      etiket: 'Bugün son gün',
-    };
-  }
-  if (gun <= 3) {
-    return {
-      metin: `${gun} gün kaldı`,
-      tur: 'yaklasan',
-      etiket: 'Yaklaşıyor',
-    };
-  }
-  return {
-    metin: `${gun} gün kaldı`,
-    tur: 'normal',
-    etiket: 'Süresi var',
-  };
-}
-// Kullanıcının girdiği miktarı doğrular.
-function miktariDuzenle(giris: string): number | null {
-  const metin = giris.trim().replace(',', '.');
-  if (!/^\d+(\.\d+)?$/.test(metin)) {
-    return null;
-  }
-  const sayi = Number(metin);
-  if (!Number.isFinite(sayi) || sayi <= 0) {
-    return null;
-  }
-  return sayi;
-}
-function miktariGoster(miktar: number): string {
-  return String(miktar).replace('.', ',');
-}
-// İşlem tarihini Türkçe gösterir.
-function islemTarihiniGoster(tarih: string): string {
-  const tarihNesnesi = new Date(tarih);
-  if (Number.isNaN(tarihNesnesi.getTime())) {
-    return 'Bilinmiyor';
-  }
-  return tarihNesnesi.toLocaleDateString('tr-TR');
-}
-// Eski ve yeni ürünleri ortak veri tipine dönüştürür.
-function kayitlariDuzenle(veri: unknown): Urun[] {
-  if (!Array.isArray(veri)) {
-    throw new Error('Ürün listesi geçersiz.');
-  }
-  return veri.map((kayit: unknown) => {
-    if (typeof kayit !== 'object' || kayit === null) {
-      throw new Error('Ürün kaydı geçersiz.');
-    }
-    const urun = kayit as Record<string, unknown>;
-    if (
-      typeof urun.id !== 'string' ||
-      typeof urun.ad !== 'string' ||
-      typeof urun.sonTarih !== 'string'
-    ) {
-      throw new Error('Eksik ürün bilgisi.');
-    }
-    const kategori =
-      KATEGORILER.find((item) => item === urun.kategori)
-      ?? 'Diğer';
-    const birim =
-      BIRIMLER.find((item) => item === urun.birim)
-      ?? 'Adet';
-    const miktar =
-      typeof urun.miktar === 'number' &&
-      Number.isFinite(urun.miktar) &&
-      urun.miktar > 0
-        ? urun.miktar
-        : 1;
-    return {
-      id: urun.id,
-      ad: urun.ad,
-      sonTarih: urun.sonTarih,
-      kategori,
-      miktar,
-      birim,
-      eklenmeTarihi:
-        typeof urun.eklenmeTarihi === 'string' &&
-        Number.isFinite(Date.parse(urun.eklenmeTarihi))
-          ? urun.eklenmeTarihi
-          : undefined,
-    };
-  });
-}
-// YENİ: İşlem geçmişindeki kayıtları doğrular.
-function gecmisiDuzenle(veri: unknown): GecmisKaydi[] {
-  if (!Array.isArray(veri)) {
-    throw new Error('İşlem geçmişi geçersiz.');
-  }
-  return veri.map((kayit: unknown) => {
-    if (typeof kayit !== 'object' || kayit === null) {
-      throw new Error('Geçmiş kaydı geçersiz.');
-    }
-    const nesne = kayit as Record<string, unknown>;
-    const urun = kayitlariDuzenle([kayit])[0];
-    if (
-      typeof nesne.kayitId !== 'string' ||
-      typeof nesne.islemTarihi !== 'string' ||
-      (nesne.islem !== 'tuketildi' &&
-        nesne.islem !== 'israf')
-    ) {
-      throw new Error('İşlem geçmişi bilgisi eksik.');
-    }
-    return {
-      ...urun,
-      kayitId: nesne.kayitId,
-      islem: nesne.islem,
-      islemTarihi: nesne.islemTarihi,
-    };
-  });
-}
-// YENİ: Kaydedilen uygulama verisini doğrular.
-function verileriDuzenle(veri: unknown): UygulamaVerisi {
-  if (
-    typeof veri !== 'object' ||
-    veri === null ||
-    Array.isArray(veri)
-  ) {
-    throw new Error('Uygulama verisi geçersiz.');
-  }
-  const kayit = veri as Record<string, unknown>;
-  return {
-    urunler: kayitlariDuzenle(kayit.urunler),
-    gecmis: gecmisiDuzenle(kayit.gecmis),
-  };
-}
+
 export default function HomeScreen() {
+  const {
+  veriler,
+  setVeriler,
+  yuklendi,
+  yuklemeHatasi,
+  kayitSirasi,
+} = useUygulama();
   // Ürün ekleme alanları
   const [urunAdi, setUrunAdi] = useState('');
   // 24. AŞAMA: Barkod okuma
@@ -336,12 +82,6 @@ const [sonOkunanBarkod, setSonOkunanBarkod] =
   const [kategori, setKategori] = useState<Kategori>('Diğer');
   const [miktar, setMiktar] = useState('1');
   const [birim, setBirim] = useState<Birim>('Adet');
-  // YENİ: Stok ve işlem geçmişi birlikte tutuluyor.
-  const [veriler, setVeriler] = useState<UygulamaVerisi>({
-    urunler: [],
-    gecmis: [],
-  });
-  const [yuklendi, setYuklendi] = useState(false);
   const [seciliIslem, setSeciliIslem] = useState<{
   urunId: string;
   islem: IslemTuru;
@@ -374,9 +114,6 @@ const [yedeklemeMesgul, setYedeklemeMesgul] = useState(false);
 // Geri yüklemeden sonra alışveriş ekranını yeniden oluşturur.
 const [alisverisRevizyonu, setAlisverisRevizyonu] =
   useState(0);
-  const [yuklemeHatasi, setYuklemeHatasi] = useState(false);
-  // Kayıt işlemlerinin sırasını korur.
-  const kayitSirasi = useRef<Promise<void>>(Promise.resolve());
   // Düzenleme alanları
   const [duzenlenenUrunId, setDuzenlenenUrunId] =
     useState<string | null>(null);
@@ -389,62 +126,6 @@ const [alisverisRevizyonu, setAlisverisRevizyonu] =
     useState<Birim>('Adet');
   const urunler = veriler.urunler;
   const gecmis = veriler.gecmis;
-  // Uygulama açıldığında verileri oku.
-  useEffect(() => {
-    let aktif = true;
-    async function verileriYukle() {
-      try {
-        const yeniKayit = await Storage.getItem(STORAGE_KEY);
-        if (!aktif) return;
-        if (yeniKayit !== null) {
-          // Yeni veri yapısı zaten mevcut.
-          const veri: unknown = JSON.parse(yeniKayit);
-          setVeriler(verileriDuzenle(veri));
-        } else {
-          // İlk geçiş: Eski ürün listesini koru.
-          const eskiKayit =
-            await Storage.getItem(ESKI_STORAGE_KEY);
-          if (!aktif) return;
-          const eskiUrunler =
-            eskiKayit !== null
-              ? kayitlariDuzenle(JSON.parse(eskiKayit))
-              : [];
-          setVeriler({
-            urunler: eskiUrunler,
-            gecmis: [],
-          });
-        }
-        setYuklendi(true);
-      } catch (hata) {
-        if (!aktif) return;
-        console.error('Veriler yüklenemedi:', hata);
-        setYuklemeHatasi(true);
-        Alert.alert(
-          'Veri hatası',
-          'Kayıtlı veriler okunamadı. Uygulamayı yeniden başlat.'
-        );
-      }
-    }
-    verileriYukle();
-    return () => {
-      aktif = false;
-    };
-  }, []);
-  // Stok ve geçmiş değişikliklerini SQLite'a kaydet.
-  useEffect(() => {
-    if (!yuklendi) return;
-    const kaydedilecekVeri = JSON.stringify(veriler);
-    // Hızlı ardışık işlemlerde yazmaları sıraya al.
-    kayitSirasi.current = kayitSirasi.current
-      .catch(() => {})
-      .then(() =>
-        Storage.setItem(STORAGE_KEY, kaydedilecekVeri)
-      );
-    kayitSirasi.current.catch((hata) => {
-      console.error('Veriler kaydedilemedi:', hata);
-      Alert.alert('Hata', 'Değişiklikler kaydedilemedi.');
-    });
-  }, [veriler, yuklendi]);
   // Ürünleri son tüketim tarihine göre sırala.
     const siraliUrunler = [...urunler].sort((a, b) => {
     const gunA = kalanGun(a.sonTarih);
