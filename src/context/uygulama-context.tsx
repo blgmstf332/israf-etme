@@ -25,6 +25,8 @@ type UygulamaContextDegeri = {
   yuklendi: boolean;
   yuklemeHatasi: boolean;
   kayitSirasi: { current: Promise<void> };
+  alisverisRevizyonu: number;
+  setAlisverisRevizyonu: Dispatch<SetStateAction<number>>;
 };
 
 const UygulamaContext =
@@ -42,6 +44,8 @@ export function UygulamaProvider({
   const [yuklendi, setYuklendi] = useState(false);
   const [yuklemeHatasi, setYuklemeHatasi] =
     useState(false);
+
+  const [alisverisRevizyonu, setAlisverisRevizyonu] = useState(0);
 
   const kayitSirasi =
     useRef<Promise<void>>(Promise.resolve());
@@ -129,6 +133,8 @@ export function UygulamaProvider({
         yuklendi,
         yuklemeHatasi,
         kayitSirasi,
+        alisverisRevizyonu,
+        setAlisverisRevizyonu,
       }}
     >
       {children}
